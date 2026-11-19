@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Practice Quiz Builder</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #f4f1ea; color: #222; line-height: 1.7; padding: 12px; }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  header.hero { background: linear-gradient(135deg, #0d47a1, #1976d2); color: #fff; border-radius: 16px; padding: 22px 18px; text-align: center; margin-bottom: 12px; }
+  header.hero h1 { font-size: 1.35rem; margin-bottom: 6px; }
+  header.hero p { font-size: .92rem; opacity: .93; }
+  .progress { position: sticky; top: 8px; z-index: 10; background: #fff; border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.1); font-size: .9rem; font-weight: 700; }
+  .progress .bar { height: 8px; background: #e3e3e3; border-radius: 99px; margin-top: 6px; overflow: hidden; }
+  .progress .bar > div { height: 100%; background: #1976d2; width: 0%; transition: width .3s; }
+  section.card { background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.07); border-left: 6px solid #1976d2; }
+  .qnum { display: inline-block; font-size: .75rem; font-weight: 800; color: #fff; background: #1976d2; border-radius: 999px; padding: 3px 12px; margin-bottom: 8px; }
+  h2 { font-size: 1.05rem; margin-bottom: 8px; }
+  pre { font-family: Consolas, monospace; background: #eef2ff; color: #0d47a1; padding: 10px 12px; border-radius: 10px; font-size: .88rem; overflow-x: auto; margin: 8px 0 12px; line-height: 1.5; }
+  .opts { display: grid; gap: 8px; }
+  .opts button { text-align: left; font-family: inherit; font-size: .93rem; line-height: 1.5; padding: 10px 12px; border-radius: 10px; border: 2px solid #ddd; background: #fafafa; cursor: pointer; }
+  .opts button:hover:not(:disabled) { border-color: #1976d2; background: #eef2ff; }
+  .opts button:disabled { cursor: default; }
+  .opts button .letter { font-weight: 800; color: #555; margin-right: 6px; }
+  .opts button.correct { border-color: #2e7d32; background: #e8f5e9; }
+  .opts button.correct .letter { color: #2e7d32; }
+  .opts button.wrong { border-color: #c62828; background: #ffebee; }
+  .opts button.wrong .letter { color: #c62828; }
+  .explain { display: none; background: #fff8e1; border: 1px solid #ffe082; border-radius: 10px; padding: 10px 12px; margin-top: 12px; font-size: .9rem; }
+  .explain.show { display: block; }
+  .explain b { color: #e65100; }
+  .verdict { font-weight: 800; margin-bottom: 4px; }
+  .verdict.ok { color: #2e7d32; }
+  .verdict.no { color: #c62828; }
+  .score { text-align: center; padding: 8px 0 2px; }
+  .score h2 { font-size: 1.4rem; }
+  .score .big { font-size: 2.4rem; font-weight: 800; color: #0d47a1; }
+  .score p { font-size: .95rem; margin: 6px 0 12px; }
+  .btn { display: inline-block; font-family: inherit; font-size: .95rem; font-weight: 700; color: #fff; background: #1976d2; border: none; border-radius: 999px; padding: 10px 22px; cursor: pointer; }
+  .btn:hover { background: #0d47a1; }
+  .btn.secondary { background: #fff; color: #1976d2; border: 2px solid #1976d2; margin-left: 8px; }
+  .error { background: #fff3e0; border: 2px solid #ff9800; border-radius: 12px; padding: 14px 16px; font-size: .92rem; }
+  .error code { font-family: Consolas, monospace; background: #eef2ff; color: #0d47a1; padding: 1px 7px; border-radius: 6px; font-size: .88em; font-weight: 700; }
+  footer { text-align: center; font-size: .8rem; color: #888; margin: 16px 0 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1 id="quiz-title">📝 Practice Quiz Builder</h1>
+  <p id="quiz-subtitle">Loading questions…</p>
+</header>
+
+<div class="progress" id="progress" hidden>
+  <span id="progress-text">Answered 0 / 0 · Score 0</span>
+  <div class="bar"><div id="progress-fill"></div></div>
+</div>
+
+<div id="app"></div>
+
+<footer id="foot"></footer>
+
+</div>
+
+<script>
+(function () {
+  var app = document.getElementById('app');
+  var quiz = null;        // parsed questions.json
+  var order = [];         // shuffled question indexes
+  var answered = [];      // per question: null | { picked: n, correct: bool }
+  var LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = text;
+    return n;
+  }
+
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
+
+  function validate(data) {
+    if (!data || !Array.isArray(data.questions) || data.questions.length === 0)
+      throw new Error('questions.json must have a non-empty "questions" array.');
+    data.questions.forEach(function (q, i) {
+      if (typeof q.question !== 'string' || !q.question)
+        throw new Error('Question ' + (i + 1) + ' is missing its "question" text.');
+      if (!Array.isArray(q.options) || q.options.length < 2)
+        throw new Error('Question ' + (i + 1) + ' needs at least 2 options.');
+      if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= q.options.length)
+        throw new Error('Question ' + (i + 1) + ' has an "answer" index out of range.');
+    });
+  }
+
+  function scoreMessage(pct) {
+    if (pct >= 90) return 'Excellent — exam ready. 🎉';
+    if (pct >= 70) return 'Solid. Re-read the explanations for the ones you missed.';
+    if (pct >= 50) return 'Getting there — the explanations are the real lesson, read them twice.';
+    return 'Keep practicing — work through the explanations, then try again.';
+  }
+
+  function renderProgress() {
+    var done = answered.filter(function (a) { return a !== null; }).length;
+    var score = answered.filter(function (a) { return a && a.correct; }).length;
+    var total = order.length;
+    document.getElementById('progress').hidden = false;
+    document.getElementById('progress-text').textContent =
+      'Answered ' + done + ' / ' + total + ' · Score ' + score;
+    document.getElementById('progress-fill').style.width =
+      (total ? Math.round(done / total * 100) : 0) + '%';
+    if (done === total && total > 0) showScore(score, total);
+  }
+
+  function showScore(score, total) {
+    var old = document.getElementById('score-card');
+    if (old) old.remove();
+    var pct = Math.round(score / total * 100);
+    var card = el('section', 'card score');
+    card.id = 'score-card';
+    card.appendChild(el('h2', null, 'Your score'));
+    var big = el('div', 'big', score + ' / ' + total + '  ·  ' + pct + '%');
+    card.appendChild(big);
+    card.appendChild(el('p', null, scoreMessage(pct)));
+    var again = el('button', 'btn', 'Try again');
+    again.addEventListener('click', startQuiz);
+    var shuffleBtn = el('button', 'btn secondary', 'Shuffle & try again');
+    shuffleBtn.addEventListener('click', function () { startQuiz(true); });
+    card.appendChild(again);
+    card.appendChild(shuffleBtn);
+    app.appendChild(card);
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function renderQuestion(q, displayNum) {
+    var card = el('section', 'card');
+    card.appendChild(el('span', 'qnum', 'Question ' + displayNum + ' of ' + order.length));
+    card.appendChild(el('h2', null, q.question));
+    if (q.code) {
+      var pre = el('pre');
+      pre.textContent = q.code;
+      card.appendChild(pre);
+    }
+    var list = el('div', 'opts');
+    var state = answered[displayNum - 1];
+    q.options.forEach(function (opt, idx) {
+      var btn = el('button');
+      btn.type = 'button';
+      var letter = el('span', 'letter', LETTERS[idx] + ')');
+      btn.appendChild(letter);
+      btn.appendChild(document.createTextNode(opt));
+      if (state) {
+        btn.disabled = true;
+        if (idx === q.answer) btn.classList.add('correct');
+        if (idx === state.picked && !state.correct) btn.classList.add('wrong');
+      }
+      btn.addEventListener('click', function () { onPick(displayNum - 1, idx, card); });
+      list.appendChild(btn);
+    });
+    card.appendChild(list);
+    if (q.explanation) {
+      var ex = el('div', 'explain' + (state ? ' show' : ''));
+      if (state) {
+        var verdict = el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
+          state.correct ? '✓ Correct!' : '✗ Not quite — the answer is ' + LETTERS[q.answer] + '.');
+        ex.appendChild(verdict);
+      }
+      var b = el('b', null, 'Why: ');
+      ex.appendChild(b);
+      ex.appendChild(document.createTextNode(q.explanation));
+      card.appendChild(ex);
+    }
+    return card;
+  }
+
+  function onPick(pos, picked, card) {
+    if (answered[pos] !== null) return;
+    var q = quiz.questions[order[pos]];
+    var correct = picked === q.answer;
+    answered[pos] = { picked: picked, correct: correct };
+    // Re-render just this card so classes + explanation appear consistently.
+    var fresh = renderQuestion(q, pos + 1);
+    card.replaceWith(fresh);
+    renderProgress();
+  }
+
+  function startQuiz(reshuffle) {
+    if (reshuffle) order = shuffle(order.slice());
+    answered = order.map(function () { return null; });
+    app.innerHTML = '';
+    var old = document.getElementById('score-card');
+    if (old) old.remove();
+    order.forEach(function (qi, i) {
+      app.appendChild(renderQuestion(quiz.questions[qi], i + 1));
+    });
+    renderProgress();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function showLoadError(err) {
+    document.getElementById('quiz-subtitle').textContent = 'Could not load questions.json';
+    var box = el('div', 'error');
+    box.innerHTML =
+      '<b>Could not load questions.json.</b><br>' +
+      'Browsers block loading local files when you open index.html directly ' +
+      '(file://). Run a tiny local server from this folder instead:<br><br>' +
+      '<code>python3 -m http.server 8000</code><br>' +
+      'then open <code>http://localhost:8000</code> in your browser.<br><br>' +
+      'Details: ' + err.message;
+    app.innerHTML = '';
+    app.appendChild(box);
+  }
+
+  fetch('questions.json')
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' while fetching questions.json');
+      return res.json();
+    })
+    .then(function (data) {
+      validate(data);
+      quiz = data;
+      document.getElementById('quiz-title').textContent =
+        '📝 ' + (quiz.title || 'Practice Quiz');
+      document.getElementById('quiz-subtitle').textContent =
+        quiz.subtitle || (quiz.questions.length + ' questions — test yourself');
+      document.getElementById('foot').textContent =
+        'Practice Quiz Builder — edit questions.json to make your own quiz.';
+      order = shuffle(quiz.questions.map(function (_, i) { return i; }));
+      startQuiz(false);
+    })
+    .catch(showLoadError);
+})();
+</script>
+</body>
+</html>
