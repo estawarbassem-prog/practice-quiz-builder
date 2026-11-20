@@ -1,8 +1,65 @@
 # Changelog
 
-All notable changes to Practice Quiz Builder, newest first.
+All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
+
+## 2026-11-20 — Radical rebuild: AI exam generator (QuizForge)
+
+- **New name, new vision: QuizForge** — "Turn any material into
+  exams". The tool is no longer CS-only: any person, any subject can
+  upload their material, bring their own API key, and get an exam.
+  The GitHub repo name/slug is unchanged.
+- **4-step wizard (Create exam)** — 1) Upload material: drag-and-drop
+  + file picker for PDF / text / `.json` banks, plus paste-text; files
+  merge into one material with name/size, total characters and PDF page
+  count. 2) Your AI key (BYO). 3) Exam settings. 4) Generate.
+- **PDF reading** — pdf.js 3.11.174 from cdnjs, loaded lazily only when
+  a PDF is added. Plain text extraction, no OCR. If the CDN cannot be
+  reached, a clear message tells the user to paste the text instead and
+  the rest of the app keeps working offline.
+- **Bring your own key** — Gemini, OpenAI, Claude, and Custom
+  (OpenAI-compatible) providers. The key lives only in the user's own
+  localStorage, is never logged, and is shown masked (last 4 chars
+  only). "Test connection" sends one tiny request and reports success
+  or the provider's exact error in plain words.
+- **Model IDs verified 2026-11-20** — Gemini `gemini-2.5-flash`
+  (GA, stable); OpenAI `gpt-4o-mini` (works until its January 2027
+  retirement); Claude `claude-sonnet-5-5` — `claude-sonnet-4-5` is
+  retired by Anthropic on 2026-11-30, so it is deliberately NOT the
+  default. Every model field is editable.
+- **Claude CORS note** — Claude's API blocks direct browser calls, so
+  a CORS-proxy URL field is offered and the app explains plainly that
+  a proxy is needed before any call is made.
+- **Exam settings** — title/subject, 5–50 questions, MCQ (4 options)
+  and True/False (2 options), difficulty Easy/Medium/Hard/Mixed,
+  language English/Arabic, focus notes, per-question timer toggle.
+- **Generation** — strict JSON-only prompt in the app's question
+  schema, markdown fences stripped, strict validation with a plain
+  error + Retry button on bad JSON. Long material splits into
+  ~12,000-character chunks on paragraph boundaries, generates
+  proportionally per chunk in sequence ("Generating part 2 of 3…"),
+  then merges, dedupes by question text and shuffles. API errors
+  (bad key, quota, timeout, network) are shown in plain words.
+- **My exams library** — generated exams saved in localStorage with
+  title, date, count, provider/model; Take / Export JSON / Delete,
+  plus Import JSON with the same validator. The built-in sample bank
+  stays as a "Try the demo — no key needed" card.
+- **Code split** — the JavaScript moved out of `index.html` into
+  `app.js` (still no build step). The quiz engine is unchanged in
+  behaviour and now takes any bank object; it also shows a question's
+  difficulty tag when present.
+- **Verified with a 37-check headless-Chrome smoke test** — demo bank
+  with no key, PDF upload + text extraction (1-page photosynthesis
+  PDF), end-to-end generation against a local mock provider (Custom +
+  Gemini shapes), full quiz run + results, 401 and malformed-JSON
+  error paths, chunking (30k chars → 3 parts → 9 questions), True/False
+  generation, library save/re-open, invalid import, Claude-without-proxy
+  message, dark mode, mobile 390px no-overflow — 37/37 passed.
+- **New screenshots** — real screenshots of the new flow
+  (`upload.png`, `key.png`, `settings.png`, `library.png`,
+  `mobile-upload.png`). The older quiz-screen screenshots remain in
+  `docs/screenshots/` but are no longer referenced in the README.
 
 ## 2026-11-20 — GUI redesign: polished app interface + styled repo
 

@@ -1,0 +1,1979 @@
+/* QuizForge — turn any material into exams.
+   Static site, no build step: plain HTML/CSS/JS. The quiz engine (timer,
+   shuffle, review, retry-wrong-only, topics, best score, dark mode) is the
+   Practice Quiz Builder engine, refactored to take any bank object
+   {title, subtitle, questions[]}. Exam generation is bring-your-own-key:
+   the user's API key lives only in their own browser's localStorage and is
+   sent only to the provider they choose. */
+(function () {
+  'use strict';
+
+  var app = document.getElementById('app');
+  var quiz = null;         // current question bank {title, subtitle, questions[]}
+  var sampleQuiz = null;   // the bundled questions.json demo bank
+  var LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+  var LS_SETTINGS = 'pqb-settings';
+  var LS_BEST = 'pqb-best';
+  var LS_DARK = 'pqb-dark';
+  var LS_BYOK = 'qf-byok';       // {provider, apiKey, model, baseUrl, proxyUrl}
+  var LS_LIB = 'qf-library';     // [{id, title, subtitle, date, count, provider, model, bank}]
+  var LS_WIZ = 'qf-wizard';      // wizard draft (exam settings only — never the key)
+
+  var PDFJS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+  var PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  var CHUNK_CHARS = 12000;
+
+  var settings = loadSettings();   // { shuffle, perQTimer, perQSeconds }
+  var selectedTopic = 'All';
+  var topics = [];
+  var run = null;                  // current attempt, see startQuiz()
+  var totalTimerId = null;
+  var perQTimerId = null;
+  var currentView = 'create';      // 'create' | 'library' | 'quiz'
+
+  /* ---------- providers ----------
+     Model IDs verified 2026-11-20 against the providers' own docs and
+     deprecation pages. Model IDs change fast — every model field is
+     editable, so a newer model can always be typed in.
+     - Gemini: gemini-2.5-flash is GA (June 2025) and still the stable
+       cheap default. (Google points brand-new projects at its 3.x Flash
+       line; if gemini-2.5-flash ever stops working for a new key, type
+       the current Flash model ID in the same field.)
+     - OpenAI: gpt-4o-mini still works, but OpenAI retires it
+       2027-01-14 — the field is editable for whatever mini replaces it.
+     - Claude: claude-sonnet-4-5 is RETIRED by Anthropic on 2026-11-30,
+       so the default is its named replacement claude-sonnet-5-5.
+       Do NOT use claude-sonnet-4-5 after 2026-11-30. */
+  var PROVIDERS = {
+    gemini: {
+      label: 'Google Gemini', keyLabel: 'Gemini API key',
+      keyUrl: 'https://aistudio.google.com/apikey',
+      defaultModel: 'gemini-2.5-flash',
+      needsProxy: false
+    },
+    openai: {
+      label: 'OpenAI (ChatGPT)', keyLabel: 'OpenAI API key',
+      keyUrl: 'https://platform.openai.com/api-keys',
+      defaultModel: 'gpt-4o-mini',
+      needsProxy: false
+    },
+    claude: {
+      label: 'Anthropic Claude', keyLabel: 'Anthropic API key',
+      keyUrl: 'https://console.anthropic.com/settings/keys',
+      defaultModel: 'claude-sonnet-5-5',
+      needsProxy: true
+    },
+    custom: {
+      label: 'Custom (OpenAI-compatible)', keyLabel: 'API key',
+      keyUrl: '',
+      defaultModel: 'gpt-4o-mini',
+      defaultBaseUrl: 'https://api.openai.com/v1',
+      needsProxy: false
+    }
+  };
+
+  /* ---------- wizard state ---------- */
+  var wiz = loadWizard();   // { step, title, count, types:{mcq,tf}, difficulty, language, focus, perQTimer }
+  var material = { files: [], pasted: '', text: '', pdfPages: 0, pdfFailed: false };
+  // material.files: [{name, size, kind: 'pdf'|'text'|'bank', chars, pages?}]
+  var byok = loadByok();    // {provider, apiKey, model, baseUrl, proxyUrl}
+  var genState = { busy: false, error: '', progress: '', lastBank: null };
+
+  /* ---------- helpers ---------- */
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined && text !== null) n.textContent = text;
+    return n;
+  }
+
+  function shuffle(arr) {
+    for (var i = arr.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    }
+    return arr;
+  }
+
+  function fmtTime(totalSeconds) {
+    var m = Math.floor(totalSeconds / 60);
+    var s = totalSeconds % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function fmtSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function icon(name, size) {
+    var s = size || 15;
+    var inner = {
+      clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+      hourglass: '<path d="M7 4h10"/><path d="M7 20h10"/><path d="M8.5 4c0 4.5 7 4.5 7 8s-7 3.5-7 8"/>',
+      pointer: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/>',
+      list: '<circle cx="5" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="19" cy="12" r="2.6"/><path d="M7.6 12h1.8M14.6 12h1.8"/>',
+      grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'
+    }[name] || '';
+    return '<svg class="ic" viewBox="0 0 24 24" width="' + s + '" height="' + s +
+      '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+  }
+
+  function topicIcon(t) {
+    if (t === 'All') return icon('grid', 24);
+    if (t === 'Pointers') return icon('pointer', 24);
+    return icon('list', 24);
+  }
+
+  /* ---------- validation ---------- */
+
+  function validate(data) {
+    if (!data || !Array.isArray(data.questions) || data.questions.length === 0)
+      throw new Error('The file must have a non-empty "questions" array.');
+    data.questions.forEach(function (q, i) {
+      var n = 'Question ' + (i + 1);
+      if (typeof q.question !== 'string' || !q.question)
+        throw new Error(n + ' is missing its "question" text.');
+      if (!Array.isArray(q.options) || q.options.length < 2)
+        throw new Error(n + ' needs at least 2 options.');
+      if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= q.options.length)
+        throw new Error(n + ' has an "answer" index out of range.');
+      if (q.topic !== undefined && typeof q.topic !== 'string')
+        throw new Error(n + ' has a "topic" that is not text.');
+      if (q.explanation !== undefined && typeof q.explanation !== 'string')
+        throw new Error(n + ' has an "explanation" that is not text.');
+      if (q.code !== undefined && typeof q.code !== 'string')
+        throw new Error(n + ' has a "code" snippet that is not text.');
+      if (q.difficulty !== undefined && typeof q.difficulty !== 'string')
+        throw new Error(n + ' has a "difficulty" that is not text.');
+    });
+  }
+
+  function scoreMessage(pct) {
+    if (pct >= 90) return 'Excellent — exam ready. 🎉';
+    if (pct >= 70) return 'Solid. Re-read the explanations for the ones you missed.';
+    if (pct >= 50) return 'Getting there — the explanations are the real lesson, read them twice.';
+    return 'Keep practicing — work through the explanations, then try again.';
+  }
+
+  /* ---------- persistence ---------- */
+
+  function loadSettings() {
+    var d = { shuffle: true, perQTimer: false, perQSeconds: 60 };
+    try {
+      var raw = localStorage.getItem(LS_SETTINGS);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (typeof s.shuffle === 'boolean') d.shuffle = s.shuffle;
+        if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
+        if (typeof s.perQSeconds === 'number' && s.perQSeconds >= 5 && s.perQSeconds <= 600)
+          d.perQSeconds = Math.round(s.perQSeconds);
+      }
+    } catch (e) { /* corrupted settings: fall back to defaults */ }
+    return d;
+  }
+
+  function saveSettings() {
+    try { localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); } catch (e) {}
+  }
+
+  function loadBest() {
+    try {
+      var raw = localStorage.getItem(LS_BEST);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
+
+  function saveBest(score, total, pct) {
+    var best = loadBest();
+    if (!best || pct > best.pct) {
+      try {
+        localStorage.setItem(LS_BEST, JSON.stringify({
+          score: score, total: total, pct: pct,
+          bank: quiz.title || 'Practice Quiz',
+          date: new Date().toISOString().slice(0, 10)
+        }));
+      } catch (e) {}
+    }
+  }
+
+  function applyDark() {
+    var dark = false;
+    try { dark = localStorage.getItem(LS_DARK) === '1'; } catch (e) {}
+    document.body.classList.toggle('dark', dark);
+    var lbl = document.getElementById('dark-label');
+    if (lbl) lbl.textContent = dark ? 'Light' : 'Dark';
+  }
+
+  /* BYO key: stored ONLY in this browser's localStorage, sent only to the
+     provider the user picked. Never logged, never shown in full. */
+  function loadByok() {
+    var d = { provider: 'gemini', apiKey: '', model: '', baseUrl: '', proxyUrl: '' };
+    try {
+      var raw = localStorage.getItem(LS_BYOK);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (s.provider && PROVIDERS[s.provider]) d.provider = s.provider;
+        if (typeof s.apiKey === 'string') d.apiKey = s.apiKey;
+        if (typeof s.model === 'string') d.model = s.model;
+        if (typeof s.baseUrl === 'string') d.baseUrl = s.baseUrl;
+        if (typeof s.proxyUrl === 'string') d.proxyUrl = s.proxyUrl;
+      }
+    } catch (e) {}
+    return d;
+  }
+
+  function saveByok() {
+    try { localStorage.setItem(LS_BYOK, JSON.stringify(byok)); } catch (e) {}
+  }
+
+  function effectiveModel() {
+    return (byok.model || '').trim() || PROVIDERS[byok.provider].defaultModel;
+  }
+
+  function maskedKey() {
+    if (!byok.apiKey) return '';
+    var k = byok.apiKey;
+    return '••••••••' + k.slice(-4);
+  }
+
+  function loadWizard() {
+    var d = { step: 1, title: '', count: 10, types: { mcq: true, tf: false },
+      difficulty: 'Mixed', language: 'English', focus: '', perQTimer: false };
+    try {
+      var raw = localStorage.getItem(LS_WIZ);
+      if (raw) {
+        var s = JSON.parse(raw);
+        if (typeof s.step === 'number' && s.step >= 1 && s.step <= 4) d.step = s.step;
+        if (typeof s.title === 'string') d.title = s.title;
+        if (typeof s.count === 'number') d.count = Math.max(5, Math.min(50, Math.round(s.count)));
+        if (s.types) {
+          if (typeof s.types.mcq === 'boolean') d.types.mcq = s.types.mcq;
+          if (typeof s.types.tf === 'boolean') d.types.tf = s.types.tf;
+        }
+        if (typeof s.difficulty === 'string') d.difficulty = s.difficulty;
+        if (typeof s.language === 'string') d.language = s.language;
+        if (typeof s.focus === 'string') d.focus = s.focus;
+        if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
+      }
+    } catch (e) {}
+    return d;
+  }
+
+  function saveWizard() {
+    try { localStorage.setItem(LS_WIZ, JSON.stringify(wiz)); } catch (e) {}
+  }
+
+  function loadLibrary() {
+    try {
+      var raw = localStorage.getItem(LS_LIB);
+      var list = raw ? JSON.parse(raw) : [];
+      return Array.isArray(list) ? list : [];
+    } catch (e) { return []; }
+  }
+
+  function saveLibrary(list) {
+    try { localStorage.setItem(LS_LIB, JSON.stringify(list)); } catch (e) {}
+    updateLibCount();
+  }
+
+  function updateLibCount() {
+    var n = loadLibrary().length;
+    var badge = document.getElementById('nav-lib-count');
+    if (badge) {
+      badge.hidden = n === 0;
+      badge.textContent = String(n);
+    }
+  }
+
+  /* ---------- views / navigation ---------- */
+
+  function setView(v) {
+    currentView = v;
+    stopTimers();
+    run = null;
+    document.getElementById('nav-create').classList.toggle('active', v === 'create');
+    document.getElementById('nav-library').classList.toggle('active', v === 'library');
+    if (v === 'create') renderWizard();
+    else if (v === 'library') renderLibrary();
+    window.scrollTo({ top: 0 });
+  }
+
+  function wireNav() {
+    document.getElementById('nav-create').addEventListener('click', function () { setView('create'); });
+    document.getElementById('nav-library').addEventListener('click', function () { setView('library'); });
+  }
+
+  /* ---------- wizard ---------- */
+
+  var STEP_NAMES = ['Upload material', 'Your AI key', 'Exam settings', 'Generate'];
+
+  function materialChars() {
+    return material.text.length + material.pasted.length;
+  }
+
+  function renderWizard() {
+    app.innerHTML = '';
+    var wrap = el('div');
+
+    // Step indicator
+    var steps = el('ol', 'steps');
+    STEP_NAMES.forEach(function (name, i) {
+      var li = el('li', 'step' + (i + 1 === wiz.step ? ' current' : '') + (i + 1 < wiz.step ? ' done' : ''));
+      li.appendChild(el('span', 'step-dot', String(i + 1)));
+      li.appendChild(el('span', 'step-name', name));
+      steps.appendChild(li);
+    });
+    wrap.appendChild(steps);
+
+    if (wiz.step === 1) renderStepUpload(wrap);
+    else if (wiz.step === 2) renderStepKey(wrap);
+    else if (wiz.step === 3) renderStepSettings(wrap);
+    else renderStepGenerate(wrap);
+
+    app.appendChild(wrap);
+    updateLibCount();
+  }
+
+  function wizardNav(wrap, opts) {
+    // opts: {back: step|null, next: step|null, nextLabel, nextDisabled, onNext}
+    var row = el('div', 'btnrow wizard-nav');
+    if (opts.back) {
+      var back = el('button', 'btn btn-secondary', '← Back');
+      back.addEventListener('click', function () { wiz.step = opts.back; saveWizard(); renderWizard(); });
+      row.appendChild(back);
+    }
+    if (opts.next) {
+      var next = el('button', 'btn btn-primary btn-big', opts.nextLabel || 'Continue →');
+      if (opts.nextDisabled) next.disabled = true;
+      next.addEventListener('click', function () {
+        if (opts.onNext) opts.onNext();
+        wiz.step = opts.next; saveWizard(); renderWizard();
+      });
+      row.appendChild(next);
+    }
+    wrap.appendChild(row);
+  }
+
+  function fieldRow(labelText, inputNode, hintText) {
+    var row = el('div', 'field');
+    row.appendChild(el('label', 'field-label', labelText));
+    row.appendChild(inputNode);
+    if (hintText) row.appendChild(el('p', 'field-hint', hintText));
+    return row;
+  }
+
+  /* ----- Step 1: upload material ----- */
+
+  function renderStepUpload(wrap) {
+    var card = el('section', 'card');
+    card.appendChild(el('p', 'kicker', 'Step 1 of 4 · Upload material'));
+    card.appendChild(el('h2', null, 'What should the exam cover?'));
+    card.appendChild(el('p', 'hero-text',
+      'Upload your PDFs, past exams, summaries — any subject, any material. ' +
+      'Or paste the text below. Everything stays in your browser until you generate.'));
+
+    var dz = el('div', 'dropzone');
+    dz.id = 'dropzone';
+    dz.tabIndex = 0;
+    dz.setAttribute('role', 'button');
+    dz.setAttribute('aria-label', 'Upload material files');
+    dz.innerHTML = '<div class="dz-big">📄 Drop files here, or <span class="dz-link">browse</span></div>' +
+      '<div class="dz-small">PDF, text (.txt / .md), or a question bank (.json) — multiple files are merged into one material.</div>';
+    var picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown,application/json';
+    picker.multiple = true;
+    picker.addEventListener('change', function () {
+      addFiles(picker.files);
+      picker.value = '';
+    });
+    dz.appendChild(picker);
+    dz.addEventListener('click', function () { picker.click(); });
+    dz.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); picker.click(); }
+    });
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('drag'); });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove('drag'); });
+    });
+    dz.addEventListener('drop', function (e) {
+      if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+    });
+    card.appendChild(dz);
+
+    var list = el('div', 'file-list');
+    list.id = 'file-list';
+    card.appendChild(list);
+
+    var pasteLabel = el('label', 'field-label', 'Or paste text directly');
+    pasteLabel.htmlFor = 'paste-text';
+    card.appendChild(pasteLabel);
+    var ta = document.createElement('textarea');
+    ta.id = 'paste-text';
+    ta.className = 'input textarea';
+    ta.rows = 6;
+    ta.placeholder = 'Paste your summary, lecture notes, or chapter text here…';
+    ta.value = material.pasted;
+    ta.addEventListener('input', function () {
+      material.pasted = ta.value;
+      refreshFileList();
+    });
+    card.appendChild(ta);
+
+    var summary = el('p', 'material-summary');
+    summary.id = 'material-summary';
+    card.appendChild(summary);
+
+    var pdfNote = el('p', 'field-hint');
+    pdfNote.id = 'pdf-note';
+    card.appendChild(pdfNote);
+
+    wrap.appendChild(card);
+    refreshFileList();
+    wizardNav(wrap, {
+      back: null, next: 2, nextLabel: 'Continue to your AI key →',
+      onNext: function () { material.pasted = ta.value; }
+    });
+  }
+
+  function refreshFileList() {
+    var list = document.getElementById('file-list');
+    var summary = document.getElementById('material-summary');
+    var pdfNote = document.getElementById('pdf-note');
+    if (!list) return;
+    list.innerHTML = '';
+    material.files.forEach(function (f, idx) {
+      var row = el('div', 'file-row');
+      row.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'bank' ? '🗂️' : '📝')));
+      var meta = el('div', 'file-meta');
+      meta.appendChild(el('span', 'file-name', f.name));
+      var sub = f.kind === 'pdf'
+        ? fmtSize(f.size) + ' · ' + f.pages + (f.pages === 1 ? ' page' : ' pages') + ' · ' + f.chars.toLocaleString() + ' chars'
+        : f.kind === 'bank'
+          ? fmtSize(f.size) + ' · question bank — saved to My exams'
+          : fmtSize(f.size) + ' · ' + f.chars.toLocaleString() + ' chars';
+      meta.appendChild(el('span', 'file-sub muted', sub));
+      row.appendChild(meta);
+      var rm = el('button', 'file-remove', '✕');
+      rm.type = 'button';
+      rm.title = 'Remove this file';
+      rm.setAttribute('aria-label', 'Remove ' + f.name);
+      rm.addEventListener('click', function () {
+        removeMaterialFile(idx);
+        refreshFileList();
+      });
+      row.appendChild(rm);
+      list.appendChild(row);
+    });
+    if (summary) {
+      var chars = materialChars();
+      var parts = [];
+      if (material.files.length) parts.push(material.files.length + (material.files.length === 1 ? ' file' : ' files'));
+      if (material.pdfPages) parts.push(material.pdfPages + (material.pdfPages === 1 ? ' PDF page' : ' PDF pages'));
+      parts.push(chars.toLocaleString() + ' characters total');
+      summary.textContent = chars > 0
+        ? 'Material ready: ' + parts.join(' · ') + '.'
+        : 'No material yet — add a file or paste some text to continue.';
+    }
+    if (pdfNote) {
+      pdfNote.textContent = material.pdfFailed
+        ? 'PDF reading needs an internet connection the first time (pdf.js loads from a CDN). It could not be loaded — paste the text instead, or check your connection and try again. Everything else still works offline.'
+        : '';
+    }
+    var nextBtn = document.querySelector('.wizard-nav .btn-primary');
+    if (nextBtn) nextBtn.disabled = materialChars() === 0;
+  }
+
+  function removeMaterialFile(idx) {
+    var f = material.files[idx];
+    if (!f) return;
+    material.files.splice(idx, 1);
+    if (f.kind !== 'bank') {
+      material.text = material.files
+        .filter(function (g) { return g.kind !== 'bank'; })
+        .map(function (g) { return g.text || ''; })
+        .join('\n\n');
+      material.pdfPages = material.files.reduce(function (sum, g) {
+        return sum + (g.kind === 'pdf' ? (g.pages || 0) : 0);
+      }, 0);
+    }
+  }
+
+  function addFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    var chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () { return addOneFile(file); });
+    });
+    chain.then(refreshFileList).catch(function (e) {
+      var note = document.getElementById('pdf-note');
+      if (note) note.textContent = e.message;
+      refreshFileList();
+    });
+  }
+
+  function addOneFile(file) {
+    var name = file.name || 'file';
+    var lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) return addPdfFile(file);
+    if (lower.endsWith('.json')) return addJsonFile(file);
+    // .txt / .md / anything else readable as text
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var text = String(reader.result || '');
+        pushMaterial({ name: name, size: file.size, kind: 'text', chars: text.length, pages: 0 }, text);
+        resolve();
+      };
+      reader.onerror = function () { reject(new Error('Could not read ' + name + '. Try again.')); };
+      reader.readAsText(file);
+    });
+  }
+
+  function pushMaterial(meta, text) {
+    meta.text = text;
+    meta.start = material.text.length;
+    material.text += (material.text ? '\n\n' : '') + text;
+    meta.chars = text.length;
+    material.files.push(meta);
+    if (meta.kind === 'pdf') material.pdfPages += (meta.pages || 0);
+  }
+
+  function addJsonFile(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var data = JSON.parse(String(reader.result || ''));
+          validate(data);
+          var lib = loadLibrary();
+          lib.unshift({
+            id: 'bank-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+            title: data.title || file.name.replace(/\.json$/i, ''),
+            subtitle: data.subtitle || (data.questions.length + ' questions — imported bank'),
+            date: new Date().toISOString().slice(0, 10),
+            count: data.questions.length,
+            provider: 'import',
+            model: '',
+            bank: data
+          });
+          saveLibrary(lib);
+          material.files.push({ name: file.name, size: file.size, kind: 'bank', chars: 0, pages: 0 });
+          resolve();
+        } catch (e) {
+          // Not a valid bank — treat its raw text as material.
+          var text = String(reader.result || '');
+          pushMaterial({ name: file.name, size: file.size, kind: 'text', chars: text.length, pages: 0 }, text);
+          resolve();
+        }
+      };
+      reader.onerror = function () { reject(new Error('Could not read ' + file.name + '. Try again.')); };
+      reader.readAsText(file);
+    });
+  }
+
+  /* PDF text extraction — pdf.js loads LAZILY, only when a PDF is added,
+     from cdnjs. Plain text extraction only, no OCR. If the CDN cannot be
+     reached, the rest of the app keeps working and the user is told to
+     paste the text instead. */
+  var pdfJsPromise = null;
+  function loadPdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
+    if (pdfJsPromise) return pdfJsPromise;
+    pdfJsPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = PDFJS_URL;
+      s.onload = function () {
+        if (!window.pdfjsLib) { reject(new Error('pdf.js loaded but did not initialise.')); return; }
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
+        resolve(window.pdfjsLib);
+      };
+      s.onerror = function () { reject(new Error('Could not load the PDF reader (pdf.js) — check your internet connection and try again, or paste the text instead.')); };
+      document.head.appendChild(s);
+    });
+    return pdfJsPromise;
+  }
+
+  function addPdfFile(file) {
+    return loadPdfJs().then(function (pdfjsLib) {
+      return file.arrayBuffer();
+    }).then(function (buf) {
+      return window.pdfjsLib.getDocument({ data: buf }).promise;
+    }).then(function (pdf) {
+      var pageTexts = [];
+      var chain = Promise.resolve();
+      for (var p = 1; p <= pdf.numPages; p++) {
+        (function (pageNum) {
+          chain = chain.then(function () {
+            return pdf.getPage(pageNum).then(function (page) {
+              return page.getTextContent();
+            }).then(function (content) {
+              var txt = content.items.map(function (it) { return it.str; }).join(' ');
+              pageTexts[pageNum - 1] = txt;
+            });
+          });
+        })(p);
+      }
+      return chain.then(function () {
+        var text = pageTexts.join('\n\n');
+        pushMaterial({ name: file.name, size: file.size, kind: 'pdf', chars: text.length, pages: pdf.numPages }, text);
+      });
+    }).catch(function (e) {
+      material.pdfFailed = true;
+      var note = document.getElementById('pdf-note');
+      if (note) note.textContent = 'Could not read ' + file.name + ': ' + e.message;
+      throw e;
+    });
+  }
+
+  /* ----- Step 2: your AI key (BYO) ----- */
+
+  function renderStepKey(wrap) {
+    var card = el('section', 'card');
+    card.appendChild(el('p', 'kicker', 'Step 2 of 4 · Your AI key'));
+    card.appendChild(el('h2', null, 'Bring your own AI key'));
+    card.appendChild(el('p', 'hero-text',
+      'QuizForge has no server and no account — you use your own API key and ' +
+      'spend your own credits. Pick a provider, paste your key, and test it.'));
+    var privacy = el('p', 'privacy-note');
+    privacy.textContent = '🔒 Your key never leaves your browser except to the provider you choose. ' +
+      'It is stored only on this device (localStorage). It is never logged or shown in full.';
+    card.appendChild(privacy);
+
+    var provRow = el('div', 'prov-row');
+    Object.keys(PROVIDERS).forEach(function (id) {
+      var b = el('button', 'prov-btn' + (byok.provider === id ? ' selected' : ''), PROVIDERS[id].label);
+      b.type = 'button';
+      b.addEventListener('click', function () {
+        byok.provider = id;
+        saveByok();
+        renderWizard();
+      });
+      provRow.appendChild(b);
+    });
+    card.appendChild(provRow);
+
+    var p = PROVIDERS[byok.provider];
+
+    var keyInput = document.createElement('input');
+    keyInput.type = 'password';
+    keyInput.id = 'byok-key';
+    keyInput.className = 'input';
+    keyInput.autocomplete = 'off';
+    keyInput.spellcheck = false;
+    keyInput.placeholder = 'Paste your ' + p.label + ' key here';
+    keyInput.value = byok.apiKey;
+    keyInput.addEventListener('input', function () {
+      byok.apiKey = keyInput.value.trim();
+      saveByok();
+      // The Continue button starts disabled when there is no key — re-enable
+      // it live as soon as a key is typed (no re-render, so focus is kept).
+      var navBtn = document.querySelector('.wizard-nav .btn-primary');
+      if (navBtn) navBtn.disabled = !byok.apiKey;
+      var warn = document.querySelector('.wizard-nav .field-hint');
+      if (warn) warn.style.display = byok.apiKey ? 'none' : '';
+      // Keep the "saved as ••••1234" hint live too.
+      var hint = keyInput.closest('.field');
+      hint = hint ? hint.querySelector('.field-hint') : null;
+      if (hint) {
+        hint.textContent = byok.apiKey
+          ? 'Saved on this device as ' + maskedKey() + ' — only the last 4 characters are ever shown.'
+          : (p.keyUrl ? 'Get one: ' + p.keyUrl : 'Get a key from your provider’s dashboard.');
+      }
+    });
+    card.appendChild(fieldRow(p.keyLabel, keyInput,
+      byok.apiKey ? 'Saved on this device as ' + maskedKey() + ' — only the last 4 characters are ever shown.'
+        : (p.keyUrl ? 'Get one: ' + p.keyUrl : 'Get a key from your provider’s dashboard.')));
+
+    var modelInput = document.createElement('input');
+    modelInput.type = 'text';
+    modelInput.id = 'byok-model';
+    modelInput.className = 'input';
+    modelInput.spellcheck = false;
+    modelInput.placeholder = p.defaultModel;
+    modelInput.value = byok.model;
+    modelInput.addEventListener('input', function () { byok.model = modelInput.value.trim(); saveByok(); });
+    card.appendChild(fieldRow('Model (editable)', modelInput,
+      'Default: ' + p.defaultModel + '. Model IDs change often — if your provider retires one, type the new ID here.'));
+
+    if (byok.provider === 'custom') {
+      var baseInput = document.createElement('input');
+      baseInput.type = 'text';
+      baseInput.id = 'byok-base';
+      baseInput.className = 'input';
+      baseInput.spellcheck = false;
+      baseInput.placeholder = p.defaultBaseUrl;
+      baseInput.value = byok.baseUrl;
+      baseInput.addEventListener('input', function () { byok.baseUrl = baseInput.value.trim(); saveByok(); });
+      card.appendChild(fieldRow('Base URL', baseInput,
+        'OpenAI-compatible endpoint, without a trailing slash. Default: ' + p.defaultBaseUrl + '.'));
+    }
+
+    if (byok.provider === 'claude') {
+      var proxyInput = document.createElement('input');
+      proxyInput.type = 'text';
+      proxyInput.id = 'byok-proxy';
+      proxyInput.className = 'input';
+      proxyInput.spellcheck = false;
+      proxyInput.placeholder = 'https://your-cors-proxy.example.com';
+      proxyInput.value = byok.proxyUrl;
+      proxyInput.addEventListener('input', function () { byok.proxyUrl = proxyInput.value.trim(); saveByok(); });
+      card.appendChild(fieldRow('CORS proxy URL (required for Claude)', proxyInput,
+        'Claude’s API blocks direct calls from a browser page, so a CORS proxy is needed to reach it. ' +
+        'The proxy must forward the request to https://api.anthropic.com and pass the x-api-key header through. ' +
+        'Without a proxy, generation with Claude cannot run from this page.'));
+    }
+
+    var testRow = el('div', 'btnrow');
+    var testBtn = el('button', 'btn btn-secondary', 'Test connection');
+    testBtn.id = 'test-conn-btn';
+    testBtn.addEventListener('click', function () { testConnection(); });
+    testRow.appendChild(testBtn);
+    var clearBtn = el('button', 'btn btn-secondary btn-small', 'Forget my key');
+    clearBtn.addEventListener('click', function () {
+      byok.apiKey = '';
+      saveByok();
+      renderWizard();
+    });
+    testRow.appendChild(clearBtn);
+    card.appendChild(testRow);
+
+    var testOut = el('div', 'test-out');
+    testOut.id = 'test-out';
+    card.appendChild(testOut);
+
+    wrap.appendChild(card);
+    wizardNav(wrap, {
+      back: 1, next: 3, nextLabel: 'Continue to exam settings →',
+      nextDisabled: !byok.apiKey
+    });
+    if (!byok.apiKey) {
+      var nav = wrap.querySelector('.wizard-nav');
+      if (nav) {
+        var warn = el('p', 'field-hint', 'Add your API key above to continue — or go back and use the demo bank in My exams, which needs no key.');
+        nav.appendChild(warn);
+      }
+    }
+  }
+
+  function testConnection() {
+    var out = document.getElementById('test-out');
+    var btn = document.getElementById('test-conn-btn');
+    if (!byok.apiKey) {
+      if (out) { out.className = 'test-out err'; out.textContent = 'Paste your API key first.'; }
+      return;
+    }
+    if (out) { out.className = 'test-out'; out.textContent = 'Testing…'; }
+    if (btn) btn.disabled = true;
+    callProvider('Reply with exactly this JSON and nothing else: {"ok": true}', 1, 'test')
+      .then(function (text) {
+        if (out) {
+          out.className = 'test-out ok';
+          out.textContent = '✓ Connected — ' + PROVIDERS[byok.provider].label + ' (' + effectiveModel() + ') answered.';
+        }
+      })
+      .catch(function (e) {
+        if (out) {
+          out.className = 'test-out err';
+          out.textContent = '✗ ' + plainError(e);
+        }
+      })
+      .then(function () { if (btn) btn.disabled = false; });
+  }
+
+  /* ----- Step 3: exam settings ----- */
+
+  function renderStepSettings(wrap) {
+    var card = el('section', 'card');
+    card.appendChild(el('p', 'kicker', 'Step 3 of 4 · Exam settings'));
+    card.appendChild(el('h2', null, 'How should the exam look?'));
+
+    var titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.id = 'ex-title';
+    titleInput.className = 'input';
+    titleInput.placeholder = 'e.g. Biology — Photosynthesis';
+    titleInput.value = wiz.title;
+    titleInput.addEventListener('input', function () { wiz.title = titleInput.value; saveWizard(); });
+    card.appendChild(fieldRow('Exam title / subject', titleInput, ''));
+
+    var countInput = document.createElement('input');
+    countInput.type = 'number';
+    countInput.id = 'ex-count';
+    countInput.className = 'input input-narrow';
+    countInput.min = '5'; countInput.max = '50';
+    countInput.value = String(wiz.count);
+    countInput.addEventListener('change', function () {
+      var v = parseInt(countInput.value, 10);
+      if (!isNaN(v)) { wiz.count = Math.max(5, Math.min(50, v)); countInput.value = String(wiz.count); saveWizard(); }
+    });
+    card.appendChild(fieldRow('Number of questions (5–50)', countInput, ''));
+
+    var typesRow = el('div', 'field');
+    typesRow.appendChild(el('span', 'field-label', 'Question types'));
+    var mcqLbl = el('label', 'set-row');
+    var mcq = document.createElement('input');
+    mcq.type = 'checkbox'; mcq.checked = wiz.types.mcq;
+    mcq.addEventListener('change', function () {
+      wiz.types.mcq = mcq.checked;
+      if (!wiz.types.mcq && !wiz.types.tf) { wiz.types.tf = true; tf.checked = true; }
+      saveWizard();
+    });
+    mcqLbl.appendChild(mcq);
+    mcqLbl.appendChild(el('span', null, 'Multiple choice (4 options)'));
+    typesRow.appendChild(mcqLbl);
+    var tfLbl = el('label', 'set-row');
+    var tf = document.createElement('input');
+    tf.type = 'checkbox'; tf.checked = wiz.types.tf;
+    tf.addEventListener('change', function () {
+      wiz.types.tf = tf.checked;
+      if (!wiz.types.tf && !wiz.types.mcq) { wiz.types.mcq = true; mcq.checked = true; }
+      saveWizard();
+    });
+    tfLbl.appendChild(tf);
+    tfLbl.appendChild(el('span', null, 'True / False (2 options)'));
+    typesRow.appendChild(tfLbl);
+    card.appendChild(typesRow);
+
+    var diffSel = document.createElement('select');
+    diffSel.id = 'ex-diff';
+    diffSel.className = 'input';
+    ['Easy', 'Medium', 'Hard', 'Mixed'].forEach(function (d) {
+      var o = document.createElement('option');
+      o.value = d; o.textContent = d;
+      if (wiz.difficulty === d) o.selected = true;
+      diffSel.appendChild(o);
+    });
+    diffSel.addEventListener('change', function () { wiz.difficulty = diffSel.value; saveWizard(); });
+    card.appendChild(fieldRow('Difficulty', diffSel, ''));
+
+    var langSel = document.createElement('select');
+    langSel.id = 'ex-lang';
+    langSel.className = 'input';
+    ['English', 'Arabic'].forEach(function (l) {
+      var o = document.createElement('option');
+      o.value = l; o.textContent = l;
+      if (wiz.language === l) o.selected = true;
+      langSel.appendChild(o);
+    });
+    langSel.addEventListener('change', function () { wiz.language = langSel.value; saveWizard(); });
+    card.appendChild(fieldRow('Language', langSel, ''));
+
+    var focusTa = document.createElement('textarea');
+    focusTa.id = 'ex-focus';
+    focusTa.className = 'input textarea';
+    focusTa.rows = 3;
+    focusTa.placeholder = 'e.g. Focus on chapter 3, skip proofs, include the light-dependent reactions…';
+    focusTa.value = wiz.focus;
+    focusTa.addEventListener('input', function () { wiz.focus = focusTa.value; saveWizard(); });
+    card.appendChild(fieldRow('Focus notes (optional)', focusTa, 'Anything the exam should emphasise or skip.'));
+
+    var perqLbl = el('label', 'set-row');
+    var perq = document.createElement('input');
+    perq.type = 'checkbox'; perq.checked = wiz.perQTimer;
+    perq.addEventListener('change', function () {
+      wiz.perQTimer = perq.checked;
+      settings.perQTimer = perq.checked;
+      saveSettings(); saveWizard();
+    });
+    perqLbl.appendChild(perq);
+    perqLbl.appendChild(el('span', null, 'Per-question countdown during the exam (uses the seconds from Settings)'));
+    var perqRow = el('div', 'field');
+    perqRow.appendChild(perqLbl);
+    card.appendChild(perqRow);
+
+    wrap.appendChild(card);
+    wizardNav(wrap, { back: 2, next: 4, nextLabel: 'Continue to generate →' });
+  }
+
+  /* ----- Step 4: generate ----- */
+
+  function renderStepGenerate(wrap) {
+    var card = el('section', 'card');
+    card.appendChild(el('p', 'kicker', 'Step 4 of 4 · Generate'));
+    card.appendChild(el('h2', null, 'Ready to generate your exam?'));
+    var sum = el('div', 'gen-summary');
+    sum.innerHTML =
+      '<div><b>Material:</b> ' + esc(materialChars().toLocaleString()) + ' characters' +
+      (material.pdfPages ? ' · ' + material.pdfPages + ' PDF pages' : '') + '</div>' +
+      '<div><b>Provider:</b> ' + esc(PROVIDERS[byok.provider].label) + ' · ' + esc(effectiveModel()) + '</div>' +
+      '<div><b>Exam:</b> ' + esc(wiz.title || '(untitled)') + ' · ' + wiz.count + ' questions · ' +
+      esc(questionTypeSummary()) + ' · ' + esc(wiz.difficulty) + ' · ' + esc(wiz.language) + '</div>';
+    card.appendChild(sum);
+
+    var genBtn = el('button', 'btn btn-primary btn-big', '⚡ Generate my exam');
+    genBtn.id = 'gen-btn';
+    genBtn.addEventListener('click', function () { generateExam(); });
+    var btnRow = el('div', 'btnrow');
+    btnRow.appendChild(genBtn);
+    card.appendChild(btnRow);
+
+    var prog = el('div', 'gen-progress');
+    prog.id = 'gen-progress';
+    card.appendChild(prog);
+    var errBox = el('div', 'bank-error');
+    errBox.id = 'gen-error';
+    card.appendChild(errBox);
+    var okBox = el('div', 'gen-success');
+    okBox.id = 'gen-success';
+    card.appendChild(okBox);
+
+    wrap.appendChild(card);
+    wizardNav(wrap, { back: 3, next: null });
+    if (genState.error) showGenError(genState.error);
+    if (genState.progress) {
+      var pr = document.getElementById('gen-progress');
+      if (pr) pr.textContent = genState.progress;
+    }
+  }
+
+  function questionTypeSummary() {
+    var parts = [];
+    if (wiz.types.mcq) parts.push('Multiple choice');
+    if (wiz.types.tf) parts.push('True/False');
+    return parts.join(' + ') || 'Multiple choice';
+  }
+
+  function showGenError(msg) {
+    genState.error = msg;
+    var box = document.getElementById('gen-error');
+    if (box) {
+      box.textContent = msg;
+      box.classList.add('show');
+      var retry = document.createElement('button');
+      retry.className = 'btn btn-secondary btn-small';
+      retry.style.marginTop = '8px';
+      retry.textContent = '↻ Retry generation';
+      retry.addEventListener('click', function () { generateExam(); });
+      box.appendChild(retry);
+    }
+  }
+
+  function clearGenError() {
+    genState.error = '';
+    var box = document.getElementById('gen-error');
+    if (box) { box.textContent = ''; box.classList.remove('show'); }
+    var ok = document.getElementById('gen-success');
+    if (ok) { ok.textContent = ''; ok.classList.remove('show'); }
+  }
+
+  /* ---------- provider calls ---------- */
+
+  function plainError(e) {
+    var msg = (e && e.message) || String(e || 'Unknown error');
+    if (/401|unauthenticated|invalid api key|incorrect api key|invalid x-api-key/i.test(msg))
+      return 'Your API key was rejected by the provider. Check the key (Step 2) and try again — make sure you copied the whole key with no extra spaces.';
+    if (/402|insufficient_quota|quota|billing|exceeded/i.test(msg))
+      return 'The provider refused the request: out of credits or quota. Check your billing / usage on the provider’s site, then try again.';
+    if (/429|rate limit|too many requests/i.test(msg))
+      return 'The provider rate-limited the request (too many requests). Wait a minute and try again.';
+    if (/404|not found|model_not_found/i.test(msg))
+      return 'The model "' + effectiveModel() + '" was not found by the provider. It may have been retired — try a newer model ID in Step 2.';
+    if (/timed out|timeout/i.test(msg))
+      return 'The request timed out. Check your connection and try again.';
+    if (/Failed to fetch|NetworkError|network|CORS|cors/i.test(msg))
+      return 'Could not reach the provider. Check your internet connection — and for Claude, make sure a CORS proxy is set (Step 2).';
+    return msg;
+  }
+
+  function fetchWithTimeout(url, options, ms) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, ms || 120000);
+    var opts = options || {};
+    opts.signal = controller.signal;
+    return fetch(url, opts).then(function (res) {
+      clearTimeout(timer);
+      return res;
+    }).catch(function (e) {
+      clearTimeout(timer);
+      if (e && e.name === 'AbortError') throw new Error('The request timed out after 2 minutes.');
+      throw e;
+    });
+  }
+
+  function extractJsonText(raw) {
+    var t = String(raw || '').trim();
+    t = t.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/g, '').trim();
+    return t;
+  }
+
+  function parseQuestionsResponse(rawText, partLabel) {
+    var text = extractJsonText(rawText);
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('The AI replied with text that is not valid JSON' +
+        (partLabel ? ' (' + partLabel + ')' : '') +
+        '. Nothing was saved. Press Retry — it usually works on the second try.');
+    }
+    if (Array.isArray(data)) data = { questions: data };
+    try {
+      validate(data);
+    } catch (e) {
+      throw new Error('The AI’s reply did not match the question format' +
+        (partLabel ? ' (' + partLabel + ')' : '') + ': ' + e.message +
+        ' Nothing was saved. Press Retry.');
+    }
+    return data.questions;
+  }
+
+  /* One model call. Returns the raw text of the model's reply.
+     mode 'test' sends a tiny prompt; 'gen' sends the full exam prompt. */
+  function callProvider(prompt, maxQuestions, mode) {
+    var provider = byok.provider;
+    var model = effectiveModel();
+    var key = byok.apiKey;
+    if (!key) return Promise.reject(new Error('No API key saved. Add one in Step 2.'));
+    if (provider === 'claude' && !(byok.proxyUrl || '').trim()) {
+      return Promise.reject(new Error(
+        'Claude’s API blocks direct calls from a browser page, so QuizForge cannot call it without a CORS proxy. ' +
+        'Add a CORS proxy URL in Step 2 (it must forward to https://api.anthropic.com and pass the x-api-key header), or switch to Gemini or OpenAI.'));
+    }
+
+    if (provider === 'gemini') {
+      var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+        encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
+      return fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { responseMimeType: 'application/json' }
+        })
+      }).then(function (res) { return readProviderResponse(res, 'Gemini'); })
+      .then(function (data) {
+        var text = data && data.candidates && data.candidates[0] &&
+          data.candidates[0].content && data.candidates[0].content.parts &&
+          data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+        if (!text) throw new Error('Gemini returned an empty reply. Press Retry.');
+        return text;
+      });
+    }
+
+    if (provider === 'openai' || provider === 'custom') {
+      var base = (provider === 'custom' ? (byok.baseUrl || PROVIDERS.custom.defaultBaseUrl) : 'https://api.openai.com/v1')
+        .replace(/\/+$/, '');
+      return fetchWithTimeout(base + '/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        body: JSON.stringify({
+          model: model,
+          messages: [{ role: 'user', content: prompt }],
+          response_format: { type: 'json_object' }
+        })
+      }).then(function (res) { return readProviderResponse(res, provider === 'custom' ? 'Custom provider' : 'OpenAI'); })
+      .then(function (data) {
+        var text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (!text) throw new Error('The provider returned an empty reply. Press Retry.');
+        return text;
+      });
+    }
+
+    // claude — always through the user's CORS proxy
+    var proxy = (byok.proxyUrl || '').trim().replace(/\/+$/, '');
+    return fetchWithTimeout(proxy + '/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': key,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: model,
+        max_tokens: 4000,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    }).then(function (res) { return readProviderResponse(res, 'Claude'); })
+    .then(function (data) {
+      var text = data && data.content && data.content[0] && data.content[0].text;
+      if (!text) throw new Error('Claude returned an empty reply. Press Retry.');
+      return text;
+    });
+  }
+
+  function readProviderResponse(res, who) {
+    if (res.ok) return res.json().catch(function () { return {}; });
+    return res.text().then(function (body) {
+      var detail = '';
+      try {
+        var j = JSON.parse(body);
+        detail = (j.error && (j.error.message || j.error.type)) || j.message || '';
+      } catch (e) { detail = body.slice(0, 200); }
+      throw new Error(who + ' error (HTTP ' + res.status + ')' + (detail ? ': ' + detail : ''));
+    });
+  }
+
+  /* ---------- generation ---------- */
+
+  function splitChunks(text) {
+    if (text.length <= CHUNK_CHARS) return [text];
+    var paras = text.split(/\n\s*\n/);
+    var chunks = [];
+    var cur = '';
+    paras.forEach(function (para) {
+      if (!para.trim()) return;
+      if (cur && (cur.length + para.length + 2) > CHUNK_CHARS) {
+        chunks.push(cur);
+        cur = para;
+      } else {
+        cur = cur ? cur + '\n\n' + para : para;
+      }
+    });
+    if (cur) chunks.push(cur);
+    // A single giant paragraph still gets hard-split.
+    var out = [];
+    chunks.forEach(function (c) {
+      while (c.length > CHUNK_CHARS) {
+        var cut = c.lastIndexOf(' ', CHUNK_CHARS);
+        if (cut < 1000) cut = CHUNK_CHARS;
+        out.push(c.slice(0, cut));
+        c = c.slice(cut).trim();
+      }
+      if (c) out.push(c);
+    });
+    return out;
+  }
+
+  function buildPrompt(chunkText, nQuestions, chunkLabel) {
+    var types = [];
+    if (wiz.types.mcq) types.push('multiple-choice questions with exactly 4 options');
+    if (wiz.types.tf) types.push('True/False questions with exactly 2 options: "True" and "False"');
+    var typeText = types.join(' and ');
+    var diffText = wiz.difficulty === 'Mixed'
+      ? 'a mix of Easy, Medium and Hard questions'
+      : wiz.difficulty + ' questions';
+    return 'You are an exam writer. Write ' + nQuestions + ' ' + typeText +
+      ' in ' + wiz.language + ' based ONLY on the material below' +
+      (chunkLabel ? ' (' + chunkLabel + ')' : '') + '. ' +
+      'Difficulty: ' + diffText + '.' +
+      (wiz.focus ? ' Focus notes from the teacher: ' + wiz.focus + '.' : '') +
+      ' Every question must be answerable from the material, have exactly one correct answer, ' +
+      'and include a short explanation of why the answer is correct.' +
+      '\n\nReply with JSON ONLY — no markdown fences, no extra text. The JSON must be an object with a "questions" array. ' +
+      'Each question must have: "question" (string), "options" (array of ' +
+      (wiz.types.mcq && wiz.types.tf ? '4 strings for multiple-choice or 2 strings ("True","False") for True/False' :
+        wiz.types.tf ? '2 strings: "True" and "False"' : '4 strings') +
+      '), "answer" (0-based index of the correct option), "explanation" (string), ' +
+      '"topic" (short string, e.g. a chapter or sub-topic), "difficulty" ("Easy", "Medium" or "Hard"). ' +
+      'Optionally "code" (a short code snippet string) only if the question is about code.' +
+      '\n\nMATERIAL:\n' + chunkText;
+  }
+
+  function generateExam() {
+    if (genState.busy) return;
+    clearGenError();
+    var fullText = (material.text + (material.pasted ? '\n\n' + material.pasted : '')).trim();
+    if (!fullText) { showGenError('Add some material first (Step 1) — upload a file or paste text.'); return; }
+    if (!byok.apiKey) { showGenError('Add your API key first (Step 2).'); return; }
+    genState.busy = true;
+    var btn = document.getElementById('gen-btn');
+    if (btn) btn.disabled = true;
+    var prog = document.getElementById('gen-progress');
+
+    var chunks = splitChunks(fullText);
+    var totalWanted = wiz.count;
+    // At least 1 question per chunk when possible, split proportionally.
+    var perChunk = chunks.map(function (c) {
+      return Math.max(1, Math.round(totalWanted * c.length / fullText.length));
+    });
+    var allQuestions = [];
+    var chain = Promise.resolve();
+    chunks.forEach(function (chunk, i) {
+      chain = chain.then(function () {
+        genState.progress = 'Generating part ' + (i + 1) + ' of ' + chunks.length + '…';
+        if (prog) prog.textContent = genState.progress;
+        var label = chunks.length > 1 ? 'part ' + (i + 1) + ' of ' + chunks.length + ' of the material' : '';
+        return callProvider(buildPrompt(chunk, perChunk[i], label), perChunk[i], 'gen');
+      }).then(function (raw) {
+        var qs = parseQuestionsResponse(raw, chunks.length > 1 ? 'part ' + (i + 1) : '');
+        allQuestions = allQuestions.concat(qs);
+      });
+    });
+
+    chain.then(function () {
+      // Dedupe by normalised question text, then shuffle.
+      var seen = {};
+      var deduped = allQuestions.filter(function (q) {
+        var k = q.question.trim().toLowerCase();
+        if (seen[k]) return false;
+        seen[k] = true;
+        return true;
+      });
+      shuffle(deduped);
+      var title = (wiz.title || '').trim() || 'Generated exam';
+      var bank = {
+        title: title,
+        subtitle: deduped.length + ' questions · generated with ' + PROVIDERS[byok.provider].label +
+          ' (' + effectiveModel() + ') · ' + wiz.difficulty + ' · ' + wiz.language,
+        questions: deduped
+      };
+      validate(bank);
+      var lib = loadLibrary();
+      lib.unshift({
+        id: 'gen-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+        title: title,
+        subtitle: bank.subtitle,
+        date: new Date().toISOString().slice(0, 10),
+        count: deduped.length,
+        provider: PROVIDERS[byok.provider].label,
+        model: effectiveModel(),
+        bank: bank
+      });
+      saveLibrary(lib);
+      genState.lastBank = bank;
+      genState.progress = '';
+      if (prog) prog.textContent = '';
+      var ok = document.getElementById('gen-success');
+      if (ok) {
+        ok.textContent = '✓ Your exam is ready: ' + deduped.length + ' questions. It was saved to My exams.';
+        ok.classList.add('show');
+        var take = document.createElement('button');
+        take.className = 'btn btn-primary btn-big';
+        take.style.marginTop = '10px';
+        take.textContent = 'Take the exam now →';
+        take.addEventListener('click', function () { loadBank(bank); });
+        ok.appendChild(take);
+      }
+      if (btn) btn.disabled = false;
+      genState.busy = false;
+    }).catch(function (e) {
+      genState.busy = false;
+      genState.progress = '';
+      if (prog) prog.textContent = '';
+      if (btn) btn.disabled = false;
+      showGenError(plainError(e));
+    });
+  }
+
+  /* ---------- library (My exams) ---------- */
+
+  function renderLibrary() {
+    app.innerHTML = '';
+    var wrap = el('div');
+    var head = el('section', 'card');
+    head.appendChild(el('p', 'kicker', 'My exams'));
+    head.appendChild(el('h2', null, 'Your saved exams'));
+    head.appendChild(el('p', 'hero-text',
+      'Exams you generated or imported live here, on this device only. ' +
+      'Take one, export it as JSON to share, or delete it.'));
+    var row = el('div', 'btnrow');
+    var createBtn = el('button', 'btn btn-primary', '✦ Create a new exam');
+    createBtn.addEventListener('click', function () { setView('create'); });
+    row.appendChild(createBtn);
+    var impLbl = el('label', 'file-label', '📂 Import exam (.json)');
+    var impInput = document.createElement('input');
+    impInput.type = 'file';
+    impInput.accept = '.json,application/json';
+    impInput.addEventListener('change', function () {
+      if (impInput.files && impInput.files[0]) importBankFile(impInput.files[0]);
+      impInput.value = '';
+    });
+    impLbl.appendChild(impInput);
+    row.appendChild(impLbl);
+    head.appendChild(row);
+    var impErr = el('div', 'bank-error');
+    impErr.id = 'import-error';
+    head.appendChild(impErr);
+    wrap.appendChild(head);
+
+    // Demo bank card — no key needed
+    if (sampleQuiz) {
+      var demo = el('section', 'card lib-card demo-card');
+      demo.appendChild(el('p', 'kicker', 'Try the demo — no key needed'));
+      demo.appendChild(el('h3', null, sampleQuiz.title || 'Sample exam'));
+      demo.appendChild(el('p', 'muted', sampleQuiz.subtitle || (sampleQuiz.questions.length + ' questions')));
+      var drow = el('div', 'btnrow');
+      var takeDemo = el('button', 'btn btn-primary', 'Take the demo exam →');
+      takeDemo.addEventListener('click', function () { loadBank(sampleQuiz); });
+      drow.appendChild(takeDemo);
+      demo.appendChild(drow);
+      wrap.appendChild(demo);
+    }
+
+    var lib = loadLibrary();
+    if (!lib.length) {
+      var empty = el('section', 'card');
+      empty.appendChild(el('p', 'muted', 'No exams saved yet. Generate your first one from the Create exam tab — upload any material, add your AI key, and go.'));
+      wrap.appendChild(empty);
+    }
+    lib.forEach(function (entry) {
+      var card = el('section', 'card lib-card');
+      card.appendChild(el('h3', null, entry.title));
+      card.appendChild(el('p', 'muted',
+        entry.count + ' questions · ' + entry.date +
+        (entry.provider && entry.provider !== 'import' ? ' · ' + entry.provider + (entry.model ? ' (' + entry.model + ')' : '') : ' · imported')));
+      var r = el('div', 'btnrow');
+      var take = el('button', 'btn btn-primary', 'Take →');
+      take.addEventListener('click', function () { loadBank(entry.bank); });
+      r.appendChild(take);
+      var exp = el('button', 'btn btn-secondary', 'Export JSON');
+      exp.addEventListener('click', function () { exportBank(entry); });
+      r.appendChild(exp);
+      var del = el('button', 'btn btn-secondary', 'Delete');
+      del.addEventListener('click', function () {
+        saveLibrary(loadLibrary().filter(function (x) { return x.id !== entry.id; }));
+        renderLibrary();
+      });
+      r.appendChild(del);
+      card.appendChild(r);
+      wrap.appendChild(card);
+    });
+
+    app.appendChild(wrap);
+    updateLibCount();
+  }
+
+  function importBankFile(file) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      var errBox = document.getElementById('import-error');
+      try {
+        var data = JSON.parse(String(reader.result || ''));
+        validate(data);
+        var lib = loadLibrary();
+        lib.unshift({
+          id: 'imp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+          title: data.title || file.name.replace(/\.json$/i, ''),
+          subtitle: data.subtitle || (data.questions.length + ' questions — imported bank'),
+          date: new Date().toISOString().slice(0, 10),
+          count: data.questions.length,
+          provider: 'import',
+          model: '',
+          bank: data
+        });
+        saveLibrary(lib);
+        renderLibrary();
+      } catch (e) {
+        if (errBox) {
+          errBox.textContent = 'Could not import that file: ' + e.message +
+            ' Check the format in the README (questions array, options, and a 0-based "answer" index).';
+          errBox.classList.add('show');
+        }
+      }
+    };
+    reader.onerror = function () {
+      var errBox = document.getElementById('import-error');
+      if (errBox) {
+        errBox.textContent = 'Could not read that file. Try picking the .json file again.';
+        errBox.classList.add('show');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function exportBank(entry) {
+    var blob = new Blob([JSON.stringify(entry.bank, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (entry.title || 'exam').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 500);
+  }
+
+  function loadBank(bank) {
+    quiz = bank;
+    selectedTopic = 'All';
+    setView('quiz');
+    showStart();
+  }
+
+  /* ---------- settings panel ---------- */
+
+  function openSettingsPanel() {
+    var p = document.getElementById('settings-panel');
+    p.hidden = false;
+    document.getElementById('settings-btn').setAttribute('aria-expanded', 'true');
+  }
+
+  function closeSettingsPanel() {
+    var p = document.getElementById('settings-panel');
+    p.hidden = true;
+    document.getElementById('settings-btn').setAttribute('aria-expanded', 'false');
+  }
+
+  function updateSettingsSummary() {
+    var sum = document.getElementById('settings-summary');
+    if (!sum) return;
+    sum.innerHTML = '';
+    sum.appendChild(document.createTextNode('Shuffle: '));
+    sum.appendChild(el('b', null, settings.shuffle ? 'On' : 'Off'));
+    sum.appendChild(document.createTextNode('  ·  Per-question timer: '));
+    sum.appendChild(el('b', null, settings.perQTimer
+      ? 'On (' + settings.perQSeconds + 's)' : 'Off'));
+  }
+
+  function wireSettingsPanel() {
+    var btn = document.getElementById('settings-btn');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var p = document.getElementById('settings-panel');
+      if (p.hidden) openSettingsPanel(); else closeSettingsPanel();
+    });
+    document.addEventListener('click', function (e) {
+      var p = document.getElementById('settings-panel');
+      if (!p.hidden && !e.target.closest('.appbar-wrap')) closeSettingsPanel();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeSettingsPanel();
+    });
+
+    var sh = document.getElementById('set-shuffle');
+    sh.checked = settings.shuffle;
+    sh.addEventListener('change', function () {
+      settings.shuffle = sh.checked;
+      saveSettings();
+      updateSettingsSummary();
+    });
+
+    var pq = document.getElementById('set-perq');
+    pq.checked = settings.perQTimer;
+    var sec = document.getElementById('set-seconds');
+    sec.value = String(settings.perQSeconds);
+    sec.disabled = !settings.perQTimer;
+    pq.addEventListener('change', function () {
+      settings.perQTimer = pq.checked;
+      sec.disabled = !pq.checked;
+      if (!pq.checked && perQTimerId !== null) {
+        clearInterval(perQTimerId);
+        perQTimerId = null;
+      }
+      saveSettings();
+      updateSettingsSummary();
+    });
+    sec.addEventListener('change', function () {
+      var v = parseInt(sec.value, 10);
+      if (!isNaN(v)) {
+        settings.perQSeconds = Math.max(5, Math.min(600, v));
+        sec.value = String(settings.perQSeconds);
+        saveSettings();
+        updateSettingsSummary();
+      }
+    });
+  }
+
+  /* ---------- timers ---------- */
+
+  function stopTimers() {
+    if (totalTimerId !== null) { clearInterval(totalTimerId); totalTimerId = null; }
+    if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
+  }
+
+  function startTotalTimer() {
+    if (totalTimerId !== null) clearInterval(totalTimerId);
+    totalTimerId = setInterval(function () {
+      var t = document.getElementById('timer-total');
+      if (t && run) t.textContent = fmtTime(Math.floor((Date.now() - run.startedAt) / 1000));
+    }, 1000);
+  }
+
+  function startPerQTimer() {
+    if (perQTimerId !== null) clearInterval(perQTimerId);
+    run.perQLeft = settings.perQSeconds;
+    var chip = document.getElementById('timer-perq');
+    if (chip) {
+      chip.textContent = fmtTime(run.perQLeft);
+      var w = chip.closest('.tchip');
+      if (w) w.classList.remove('low');
+    }
+    perQTimerId = setInterval(function () {
+      run.perQLeft--;
+      var c = document.getElementById('timer-perq');
+      if (c) {
+        c.textContent = fmtTime(Math.max(run.perQLeft, 0));
+        var wrap = c.closest('.tchip');
+        if (wrap && run.perQLeft <= 10) wrap.classList.add('low');
+      }
+      if (run.perQLeft <= 0) {
+        clearInterval(perQTimerId);
+        perQTimerId = null;
+        onTimeout();
+      }
+    }, 1000);
+  }
+
+  /* ---------- quiz engine: start screen ---------- */
+
+  function buildTopics() {
+    var seen = {};
+    topics = [];
+    quiz.questions.forEach(function (q) {
+      var t = q.topic || 'General';
+      if (!seen[t]) { seen[t] = true; topics.push(t); }
+    });
+  }
+
+  function statChip(text, cls) {
+    return el('span', 'stat' + (cls ? ' ' + cls : ''), text);
+  }
+
+  function howStep(num, title, text) {
+    var step = el('div', 'how-step');
+    step.appendChild(el('span', 'step-num', num));
+    step.appendChild(el('h3', null, title));
+    step.appendChild(el('p', null, text));
+    return step;
+  }
+
+  function showStart(note) {
+    stopTimers();
+    run = null;
+    currentView = 'quiz';
+    document.getElementById('nav-create').classList.remove('active');
+    document.getElementById('nav-library').classList.remove('active');
+    app.innerHTML = '';
+    buildTopics();
+
+    var backRow = el('div', 'btnrow back-row');
+    var back = el('button', 'btn btn-secondary btn-small', '← Back to My exams');
+    back.addEventListener('click', function () { setView('library'); });
+    backRow.appendChild(back);
+    app.appendChild(backRow);
+
+    var hero = el('section', 'card hero');
+    hero.appendChild(el('p', 'kicker', quiz.subtitle || 'Practice exam'));
+    hero.appendChild(el('h2', null, quiz.title || 'Practice Quiz'));
+    hero.appendChild(el('p', 'hero-text',
+      'Answer one question at a time — every answer comes with a clear explanation.'));
+    var stats = el('div', 'stats');
+    stats.appendChild(statChip(quiz.questions.length + ' questions'));
+    stats.appendChild(statChip(topics.length + (topics.length === 1 ? ' topic' : ' topics')));
+    var best = loadBest();
+    if (best && best.bank === (quiz.title || 'Practice Quiz')) {
+      stats.appendChild(statChip('🏆 Best: ' + best.score + '/' + best.total +
+        ' (' + best.pct + '%)', 'stat-best'));
+    } else {
+      stats.appendChild(statChip('No attempts yet'));
+    }
+    hero.appendChild(stats);
+    if (note) hero.appendChild(el('p', 'bank-note', note));
+    app.appendChild(hero);
+
+    var topicsWrap = el('div', 'topics');
+    var all = ['All'].concat(topics);
+    all.forEach(function (t) {
+      var n = t === 'All' ? quiz.questions.length
+        : quiz.questions.filter(function (q) { return (q.topic || 'General') === t; }).length;
+      var card = el('button', 'topic-card' + (selectedTopic === t ? ' selected' : ''));
+      card.type = 'button';
+      var ic = el('span', 'topic-icon');
+      ic.innerHTML = topicIcon(t);
+      card.appendChild(ic);
+      card.appendChild(el('span', 'topic-name', t === 'All' ? 'All topics' : t));
+      card.appendChild(el('span', 'topic-count', n + (n === 1 ? ' question' : ' questions')));
+      card.appendChild(el('span', 'topic-go', 'Start →'));
+      card.addEventListener('click', function () {
+        selectedTopic = t;
+        startQuiz();
+      });
+      topicsWrap.appendChild(card);
+    });
+    app.appendChild(topicsWrap);
+
+    var startCard = el('section', 'card');
+    var row = el('div', 'btnrow');
+    var start = el('button', 'btn btn-primary btn-big', 'Start quiz →');
+    start.id = 'start-quiz-btn';
+    start.addEventListener('click', function () { startQuiz(); });
+    row.appendChild(start);
+    startCard.appendChild(row);
+
+    var sum = el('p', 'settings-summary');
+    sum.id = 'settings-summary';
+    startCard.appendChild(sum);
+    var changeBtn = el('button', 'btn btn-secondary btn-small', 'Change settings');
+    changeBtn.addEventListener('click', function () { openSettingsPanel(); });
+    var changeRow = el('div', 'btnrow');
+    changeRow.style.marginTop = '4px';
+    changeRow.appendChild(changeBtn);
+    startCard.appendChild(changeRow);
+
+    startCard.appendChild(el('div', 'hint',
+      'Shortcuts during the quiz: keys 1–4 pick an answer, Enter moves to the next question.'));
+    app.appendChild(startCard);
+
+    var how = el('section', 'card how');
+    how.appendChild(el('h2', null, 'How it works'));
+    var steps = el('div', 'how-steps');
+    steps.appendChild(howStep('1', 'Pick a topic',
+      'Choose All topics or one topic card — or generate a new exam from any material.'));
+    steps.appendChild(howStep('2', 'Answer & learn',
+      'Get instant feedback with a “Why” explanation after every answer.'));
+    steps.appendChild(howStep('3', 'Review & retry',
+      'See your full review at the end and re-try only the ones you missed.'));
+    how.appendChild(steps);
+    app.appendChild(how);
+
+    updateSettingsSummary();
+  }
+
+  /* ---------- quiz engine: run ---------- */
+
+  function startQuiz(qIndexes) {
+    stopTimers();
+    var indexes;
+    if (qIndexes) {
+      indexes = qIndexes.slice();
+    } else {
+      indexes = quiz.questions.map(function (_, i) { return i; })
+        .filter(function (i) {
+          return selectedTopic === 'All' || (quiz.questions[i].topic || 'General') === selectedTopic;
+        });
+    }
+    if (settings.shuffle) indexes = shuffle(indexes);
+
+    var optOrders = indexes.map(function (qi) {
+      var q = quiz.questions[qi];
+      var opts = q.options.map(function (text, idx) {
+        return { text: text, correct: idx === q.answer };
+      });
+      return settings.shuffle ? shuffle(opts) : opts;
+    });
+
+    run = {
+      qIndexes: indexes,
+      optOrders: optOrders,
+      answers: indexes.map(function () { return null; }),
+      current: 0,
+      startedAt: Date.now(),
+      perQLeft: settings.perQSeconds,
+      isRetry: !!qIndexes
+    };
+    renderQuestion();
+    startTotalTimer();
+  }
+
+  function renderProgress() {
+    var done = run.answers.filter(function (a) { return a !== null; }).length;
+    var score = run.answers.filter(function (a) { return a && a.correct; }).length;
+    var total = run.qIndexes.length;
+    var p = document.getElementById('progress-text');
+    if (p) p.textContent = 'Answered ' + done + ' / ' + total + ' · Score ' + score;
+    var f = document.getElementById('progress-fill');
+    if (f) f.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
+  }
+
+  function renderQuestion() {
+    var pos = run.current;
+    var qi = run.qIndexes[pos];
+    var q = quiz.questions[qi];
+    var state = run.answers[pos];
+    app.innerHTML = '';
+
+    var top = el('div', 'card quiz-top');
+    var row1 = el('div', 'top-row');
+    row1.appendChild(el('span', 'counter', 'Question ' + (pos + 1) + ' of ' + run.qIndexes.length));
+    var timers = el('span', 'timers');
+    var totalChip = el('span', 'tchip');
+    totalChip.innerHTML = icon('clock', 15);
+    var tt = el('span');
+    tt.id = 'timer-total';
+    tt.textContent = '00:00';
+    totalChip.appendChild(tt);
+    timers.appendChild(totalChip);
+    if (settings.perQTimer) {
+      var perq = el('span', 'tchip perq');
+      perq.innerHTML = icon('hourglass', 15);
+      var pt = el('span');
+      pt.id = 'timer-perq';
+      pt.textContent = fmtTime(run.perQLeft);
+      perq.appendChild(pt);
+      timers.appendChild(perq);
+    }
+    row1.appendChild(timers);
+    top.appendChild(row1);
+    var progWrap = el('div', 'progress-wrap');
+    var bar = el('div', 'bar');
+    var fill = el('div');
+    fill.id = 'progress-fill';
+    bar.appendChild(fill);
+    progWrap.appendChild(bar);
+    var ptext = el('span', 'progress-text');
+    ptext.id = 'progress-text';
+    progWrap.appendChild(ptext);
+    top.appendChild(progWrap);
+    app.appendChild(top);
+    renderProgress();
+
+    var card = el('section', 'card q-card');
+    var meta = el('div', 'q-meta');
+    meta.appendChild(el('span', 'qnum', 'Q' + (pos + 1)));
+    if (q.topic) meta.appendChild(el('span', 'topic-tag', q.topic));
+    if (q.difficulty) meta.appendChild(el('span', 'topic-tag', q.difficulty));
+    card.appendChild(meta);
+    card.appendChild(el('h2', 'q-text', q.question));
+    if (q.code) {
+      var pre = el('pre', 'q-code');
+      pre.textContent = q.code;
+      card.appendChild(pre);
+    }
+    var list = el('div', 'opts');
+    run.optOrders[pos].forEach(function (opt, idx) {
+      var btn = el('button', 'opt');
+      btn.type = 'button';
+      btn.appendChild(el('span', 'letter', LETTERS[idx]));
+      var txt = el('span', 'opt-text');
+      txt.textContent = opt.text;
+      btn.appendChild(txt);
+      if (state) {
+        btn.disabled = true;
+        if (opt.correct) btn.classList.add('correct');
+        if (idx === state.picked && !state.correct) btn.classList.add('wrong');
+        if (!opt.correct && idx !== state.picked) btn.classList.add('dim');
+      }
+      btn.addEventListener('click', function () {
+        btn.blur();
+        onPick(pos, idx);
+      });
+      list.appendChild(btn);
+    });
+    card.appendChild(list);
+
+    if (q.explanation && state) {
+      var ex = el('div', 'explain show');
+      var verdict;
+      if (state.timedOut) {
+        verdict = el('div', 'verdict timeout', '⏰ Time ran out — the answer is ' +
+          LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })] + '.');
+      } else {
+        verdict = el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
+          state.correct ? '✓ Correct!'
+            : '✗ Not quite — the answer is ' +
+              LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })] + '.');
+      }
+      ex.appendChild(verdict);
+      ex.appendChild(el('b', null, 'Why: '));
+      ex.appendChild(document.createTextNode(q.explanation));
+      card.appendChild(ex);
+    }
+    app.appendChild(card);
+
+    if (state) {
+      var row = el('div', 'btnrow');
+      var last = pos === run.qIndexes.length - 1;
+      var next = el('button', 'btn btn-primary btn-big', last ? 'See my results ✓' : 'Next question →');
+      next.id = 'next-btn';
+      next.addEventListener('click', function () { next.blur(); nextQuestion(); });
+      row.appendChild(next);
+      app.appendChild(row);
+    } else {
+      app.appendChild(el('div', 'hint', 'Keys: 1–' +
+        Math.min(run.optOrders[pos].length, 6) + ' to answer · Enter for next'));
+    }
+
+    if (!state && settings.perQTimer) startPerQTimer();
+  }
+
+  function onPick(pos, displayIdx) {
+    if (run.answers[pos] !== null) return;
+    if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
+    var correct = run.optOrders[pos][displayIdx].correct;
+    run.answers[pos] = { picked: displayIdx, correct: correct, timedOut: false };
+    renderQuestion();
+    var next = document.getElementById('next-btn');
+    if (next) next.focus();
+  }
+
+  function onTimeout() {
+    if (!run || run.answers[run.current] !== null) return;
+    run.answers[run.current] = { picked: null, correct: false, timedOut: true };
+    renderQuestion();
+    var next = document.getElementById('next-btn');
+    if (next) next.focus();
+  }
+
+  function nextQuestion() {
+    if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
+    if (run.current < run.qIndexes.length - 1) {
+      run.current++;
+      renderQuestion();
+    } else {
+      showResults();
+    }
+  }
+
+  /* ---------- quiz engine: results ---------- */
+
+  function ringSVG(score, total, pct) {
+    var C = 2 * Math.PI * 70;
+    var off = (C * (1 - pct / 100)).toFixed(1);
+    return '<svg class="ring" viewBox="0 0 160 160" width="150" height="150" role="img" aria-label="Score ' +
+      score + ' out of ' + total + '">' +
+      '<circle class="ring-track" cx="80" cy="80" r="70"/>' +
+      '<circle class="ring-fill" cx="80" cy="80" r="70" stroke-dasharray="' + C.toFixed(1) +
+      '" stroke-dashoffset="' + off + '" transform="rotate(-90 80 80)"/>' +
+      '<text class="ring-score" x="80" y="78" text-anchor="middle">' + score + '/' + total + '</text>' +
+      '<text class="ring-pct" x="80" y="100" text-anchor="middle">' + pct + '%</text>' +
+      '</svg>';
+  }
+
+  function showResults() {
+    stopTimers();
+    var total = run.qIndexes.length;
+    var score = run.answers.filter(function (a) { return a && a.correct; }).length;
+    var pct = total ? Math.round(score / total * 100) : 0;
+    if (!run.isRetry) saveBest(score, total, pct);
+
+    app.innerHTML = '';
+    var card = el('section', 'card results-card');
+    card.appendChild(el('p', 'kicker', 'Results'));
+    card.appendChild(el('h2', null, 'Your score'));
+
+    var ringWrap = el('div', 'ring-wrap');
+    var ringBox = el('div', 'ring-box');
+    ringBox.innerHTML = ringSVG(score, total, pct);
+    ringWrap.appendChild(ringBox);
+    var side = el('div', 'ring-side');
+    side.appendChild(el('div', 'big-pct', pct + '%'));
+    var secs = Math.floor((Date.now() - run.startedAt) / 1000);
+    side.appendChild(el('p', null, scoreMessage(pct)));
+    side.appendChild(el('p', 'muted', 'Finished in ' + fmtTime(secs) + ' · ' + total + ' questions.'));
+    var best = loadBest();
+    if (best && best.bank === (quiz.title || 'Practice Quiz')) {
+      side.appendChild(el('div', 'best',
+        '🏆 Best score on this quiz: ' + best.score + '/' + best.total + ' (' + best.pct + '%)'));
+    }
+    ringWrap.appendChild(side);
+    card.appendChild(ringWrap);
+
+    var reviewTitle = el('h2', 'review-title', 'Review');
+    card.appendChild(reviewTitle);
+    run.qIndexes.forEach(function (qi, pos) {
+      var q = quiz.questions[qi];
+      var a = run.answers[pos];
+      var opts = run.optOrders[pos];
+      var correctIdx = opts.findIndex(function (o) { return o.correct; });
+      var item = el('div', 'review-item');
+      var status = el('span', 'status-chip ' + ((a && a.correct) ? 'ok' : 'no'),
+        a && a.correct ? '✓ Correct' : (a && a.timedOut ? '⏰ Time out' : '✗ Wrong'));
+      item.appendChild(status);
+      item.appendChild(el('div', 'rq', (pos + 1) + '. ' + q.question));
+      if (q.code) {
+        var pre = el('pre', 'q-code');
+        pre.textContent = q.code;
+        item.appendChild(pre);
+      }
+      var yours = a && a.picked !== null ? opts[a.picked].text : null;
+      var line = el('div', 'ra');
+      if (a && a.correct) {
+        line.appendChild(document.createTextNode('Your answer: '));
+        line.appendChild(el('span', 'yours ok', '✓ ' + yours));
+      } else if (a && a.timedOut) {
+        line.appendChild(document.createTextNode('Your answer: '));
+        line.appendChild(el('span', 'yours', '⏰ No answer — time ran out'));
+        line.appendChild(document.createTextNode('  ·  Correct: '));
+        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + opts[correctIdx].text));
+      } else {
+        line.appendChild(document.createTextNode('Your answer: '));
+        line.appendChild(el('span', 'yours', '✗ ' + (yours !== null ? yours : 'No answer')));
+        line.appendChild(document.createTextNode('  ·  Correct: '));
+        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + opts[correctIdx].text));
+      }
+      item.appendChild(line);
+      if (q.explanation) {
+        var rex = el('div', 'rex');
+        rex.appendChild(el('b', null, 'Why: '));
+        rex.appendChild(document.createTextNode(q.explanation));
+        item.appendChild(rex);
+      }
+      card.appendChild(item);
+    });
+
+    var row = el('div', 'btnrow');
+    var wrongIndexes = run.qIndexes.filter(function (_, pos) {
+      var a = run.answers[pos];
+      return !a || !a.correct;
+    });
+    if (wrongIndexes.length > 0) {
+      var retryWrong = el('button', 'btn btn-primary', '↻ Retry wrong answers only (' + wrongIndexes.length + ')');
+      retryWrong.addEventListener('click', function () { startQuiz(wrongIndexes); });
+      row.appendChild(retryWrong);
+    }
+    var again = el('button', 'btn btn-secondary', 'Try again (all)');
+    again.addEventListener('click', function () { startQuiz(); });
+    row.appendChild(again);
+    var home = el('button', 'btn btn-secondary', 'Back to topics');
+    home.addEventListener('click', function () { showStart(); });
+    row.appendChild(home);
+    card.appendChild(row);
+    app.appendChild(card);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  /* ---------- keyboard shortcuts ---------- */
+
+  document.addEventListener('keydown', function (e) {
+    if (!run) return;
+    var tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    var state = run.answers[run.current];
+    if (!state && /^[1-6]$/.test(e.key)) {
+      var idx = parseInt(e.key, 10) - 1;
+      if (idx < run.optOrders[run.current].length) {
+        e.preventDefault();
+        onPick(run.current, idx);
+      }
+    } else if (state && e.key === 'Enter') {
+      e.preventDefault();
+      nextQuestion();
+    }
+  });
+
+  /* ---------- dark mode toggle ---------- */
+
+  document.getElementById('dark-toggle').addEventListener('click', function () {
+    var dark = !document.body.classList.contains('dark');
+    try { localStorage.setItem(LS_DARK, dark ? '1' : '0'); } catch (e) {}
+    applyDark();
+  });
+
+  /* ---------- load error ---------- */
+
+  function showLoadError(err) {
+    var box = el('div', 'error');
+    box.innerHTML =
+      '<b>Could not load questions.json.</b><br>' +
+      'Browsers block loading local files when you open index.html directly ' +
+      '(file://). Run a tiny local server from this folder instead:<br><br>' +
+      '<code>python3 -m http.server 8000</code><br>' +
+      'then open <code>http://localhost:8000</code> in your browser.<br><br>' +
+      'Details: ' + esc(err.message);
+    app.innerHTML = '';
+    app.appendChild(box);
+  }
+
+  /* ---------- boot ---------- */
+
+  applyDark();
+  wireSettingsPanel();
+  wireNav();
+  fetch('questions.json')
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' while fetching questions.json');
+      return res.json();
+    })
+    .then(function (data) {
+      validate(data);
+      quiz = data;
+      sampleQuiz = data;
+      setView('create');
+    })
+    .catch(showLoadError);
+})();

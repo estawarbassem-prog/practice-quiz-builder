@@ -1,92 +1,138 @@
-# Practice Quiz Builder
+# QuizForge — Turn any material into exams
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-1668E8.svg)](LICENSE)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
-![Questions](https://img.shields.io/badge/questions-10-1668E8)
-![Course](https://img.shields.io/badge/course-CS.212-1668E8)
+![No build step](https://img.shields.io/badge/build-none-brightgreen)
+![Bring your own key](https://img.shields.io/badge/API_key-bring_your_own-1668E8)
 
-A tiny, dependency-free practice quiz app: one HTML file, one CSS file, one
-JSON file. Edit `questions.json`, open the page, and you have an interactive
-multiple-choice quiz with instant feedback, explanations, and a final score —
-no build step, no framework, no server code, no account.
+QuizForge turns **any material into an exam** — any subject, any person.
+Upload your PDFs, past exams, summaries or notes, paste in **your own**
+AI API key, describe the exam you want, and get a ready-to-take quiz in
+seconds. No account, no server, no build step: it is a static site that
+runs entirely in your browser (and works on GitHub Pages for free).
 
-## Why this exists
-
-Built by Bassem Estawar, a second-year Computer Science student at
-Misr University for Science and Technology (MUST). During exam season he makes
-study summaries from course PDFs and turns them into small practice-question
-websites that his classmates use to revise. This repo is the reusable template
-behind those pages, so anyone can make the same kind of quiz for any subject.
-
-The sample bank included here is 10 multiple-choice questions on **C pointers
-and linked lists** (CS.212 Data Structures level) — the topic that carried the
-most marks in his own course quiz. Every answer was checked by compiling and
-running the code snippets.
+It started as Practice Quiz Builder, a small quiz app with 10 verified
+C pointers / linked-list questions. The quiz engine from that app —
+timer, shuffle, instant explanations, review, retry-wrong-only, topics,
+best score, dark mode — is still here, now as the player for every exam
+QuizForge generates. The sample bank is kept as a built-in demo.
 
 ## Screenshots
 
-| Start screen | Question |
+| Upload material | Your AI key |
 |---|---|
-| ![Start screen](docs/screenshots/start.png) | ![Question screen](docs/screenshots/question.png) |
+| ![Upload material](docs/screenshots/upload.png) | ![Your AI key](docs/screenshots/key.png) |
 
-| Results | Dark mode |
+| Exam settings | My exams (library) |
 |---|---|
-| ![Results screen](docs/screenshots/results.png) | ![Dark mode](docs/screenshots/dark.png) |
+| ![Exam settings](docs/screenshots/settings.png) | ![My exams](docs/screenshots/library.png) |
 
-It works on phones too — same screens, stacked layout:
+It works on phones too — same flow, stacked layout:
 
-![Mobile start screen](docs/screenshots/mobile-start.png)
+![Mobile upload step](docs/screenshots/mobile-upload.png)
 
-## Features
+## How it works
 
-- **Dashboard start screen** — stat chips (questions, topics, best score),
-  topic cards you tap to start that topic right away, a big Start button,
-  and a "How it works" strip.
-- **One question at a time**, with a progress bar and a "Question 3 of 10"
-  counter in the top bar.
-- **Timer** — a total elapsed timer on every attempt, plus an optional
-  per-question countdown (off by default; set the seconds in Settings).
-  Running out of time marks the question wrong and shows the correct answer.
-- **Shuffle** — questions and answer options are shuffled (on by default).
-  The correct answer is tracked through the shuffle, so the key never breaks.
-- **Instant feedback + explanations** — pick an answer and see right away
-  whether it was correct, with a "Why" explanation.
-- **Results screen** — a score ring with your percentage, finish time, and a
-  full review of every question: your answer vs the correct answer, with the
-  explanation. A **Retry wrong answers only** button re-quizzes just the
-  ones you missed.
-- **Topic filter** — topic cards on the start screen (e.g. Pointers,
-  Linked List) so you can drill one topic at a time.
-- **Settings panel** — shuffle and the per-question countdown live in a
-  dropdown in the header, openable from anywhere; the start screen shows a
-  live summary of your current settings.
-- **Best score** — your best result for the current bank is saved in the
-  browser (localStorage) and shown on the start screen.
-- **Dark mode** — toggle in the header; your choice is remembered. A dark
-  version of the same beige/blue identity.
-- **Keyboard shortcuts** — keys `1`–`4` pick an answer, `Enter` moves to the
-  next question.
-- **Load your own bank** — pick any `.json` file in the same format from the
-  start screen. A bad file shows a clear error instead of breaking the page,
-  and you can restore the sample bank with one click.
-- **Settings persist** — shuffle and timer choices are remembered on the
-  device.
+1. **Upload material** — drag-and-drop or pick files: PDF, text
+   (`.txt` / `.md`), or a question bank (`.json`). Multiple files merge
+   into one material. You can also paste text directly. PDF text is
+   extracted in the browser with pdf.js (loaded lazily from a CDN the
+   first time you add a PDF; plain text extraction only, no OCR). If
+   the reader cannot load, the app tells you to paste the text instead
+   and everything else keeps working offline.
+2. **Your AI key** — pick a provider (Google Gemini, OpenAI, Anthropic
+   Claude, or any OpenAI-compatible endpoint), paste your API key, pick
+   a model, and press **Test connection**. You spend your own credits;
+   QuizForge has no server and no account.
+3. **Exam settings** — title/subject, 5–50 questions, question types
+   (multiple choice with 4 options, True/False, or both), difficulty
+   (Easy / Medium / Hard / Mixed), language (English / Arabic), focus
+   notes ("focus on chapter 3, skip proofs"), and an optional
+   per-question countdown.
+4. **Generate** — the material is split into ~12,000-character chunks,
+   questions are generated per chunk in sequence with a progress
+   indicator ("Generating part 2 of 3…"), then merged, de-duplicated
+   and shuffled. The exam is saved to **My exams** and you can take it
+   right away with the full quiz engine.
+
+**My exams** is your library: every generated or imported exam lives
+there (on this device only) with Take / Export JSON / Delete. A valid
+`.json` bank can be imported, and the built-in demo bank is always
+there as a card: "Try the demo — no key needed".
+
+## Supported providers
+
+| Provider | Default model | Notes |
+|---|---|---|
+| Google Gemini | `gemini-2.5-flash` | Key in the URL (`?key=`), JSON mode. |
+| OpenAI (ChatGPT) | `gpt-4o-mini` | Chat Completions, `response_format: json_object`. |
+| Anthropic Claude | `claude-sonnet-5-5` | **Needs a CORS proxy** — see below. |
+| Custom (OpenAI-compatible) | `gpt-4o-mini` | Any base URL + model, same shape as OpenAI. |
+
+Model IDs change fast — every model field is editable, so if a
+provider retires a model you can type the new ID in the same field.
+Defaults were verified on 2026-11-20: `gemini-2.5-flash` is GA and
+stable; `gpt-4o-mini` still works but OpenAI retires it in January
+2027; `claude-sonnet-4-5` is retired by Anthropic on 2026-11-30, so
+the Claude default is its named replacement `claude-sonnet-5-5` —
+do not use `claude-sonnet-4-5` after that date.
+
+### Claude and CORS
+
+Claude's API blocks direct calls from a browser page, so QuizForge
+cannot call it without a CORS proxy. Add your proxy URL in Step 2 —
+the proxy must forward the request to `https://api.anthropic.com` and
+pass the `x-api-key` header through. Without a proxy, Claude shows a
+plain message explaining this before any call is made. Gemini, OpenAI
+and Custom endpoints work directly.
+
+## Privacy
+
+**Your key never leaves your browser except to the provider you
+choose.** It is stored only on your own machine (localStorage), never
+logged, and never shown in full — only the last 4 characters, e.g.
+`••••••••1234`. Generated exams are also stored only locally. There is
+no account, no analytics, no server receiving your material or your key.
+
+## The quiz engine
+
+Every exam plays in the same engine:
+
+- **One question at a time**, progress bar, "Question 3 of 10" counter.
+- **Timer** — total elapsed timer on every attempt, plus an optional
+  per-question countdown (set the seconds in Settings).
+- **Shuffle** — questions and answer options are shuffled (on by
+  default). The correct answer is tracked through the shuffle, so the
+  key never breaks.
+- **Instant feedback + explanations** — pick an answer and see right
+  away whether it was correct, with a "Why" explanation.
+- **Results screen** — score ring with percentage, finish time, and a
+  full review of every question. **Retry wrong answers only**
+  re-quizzes just the ones you missed.
+- **Topic filter** — topic cards on the start screen, so you can drill
+  one topic at a time.
+- **Best score** — your best result for the current exam is saved in
+  the browser and shown on the start screen.
+- **Dark mode** — toggle in the header; your choice is remembered.
+- **Keyboard shortcuts** — keys `1`–`4` pick an answer, `Enter` moves
+  to the next question.
 
 ## Project structure
 
 ```
-index.html            — the app (HTML + JavaScript, no build step)
+index.html            — the app shell (header, nav, wizard mount point)
+app.js                — everything: wizard, providers, generation, library, quiz engine
 style.css             — all styling: beige identity, dark mode, responsive layout
-questions.json        — the sample question bank (10 C pointers / linked-list MCQ)
-docs/screenshots/     — real screenshots of the app (desktop + mobile, light + dark)
-CHANGELOG.md          — what changed in each daily update
+questions.json        — the built-in demo bank (10 C pointers / linked-list MCQ)
+docs/screenshots/     — real screenshots of the app (desktop + mobile)
+CHANGELOG.md          — what changed in each update
 LICENSE               — MIT
 ```
 
 ## How to use it
 
-1. **Run it locally.** Browsers block `fetch()` from `file://`, so serve the
-   folder with a tiny local server (from inside this folder):
+1. **Run it locally.** Browsers block `fetch()` from `file://`, so serve
+   the folder with a tiny local server (from inside this folder):
 
    ```bash
    python3 -m http.server 8000
@@ -95,37 +141,41 @@ LICENSE               — MIT
    Then open <http://localhost:8000> in your browser.
    (`npx serve .` or VS Code's Live Server work too.)
 
-2. **Take the quiz.** Pick a topic (or All), check the settings you want,
-   and press **Start quiz**. Click an answer — or press `1`–`4` — to get
-   instant feedback and an explanation, then press `Enter` (or Next) to move
-   on. At the end you get your score, a full review, and the option to retry
-   only the questions you got wrong.
+2. **Create an exam.** Upload your material, add your API key, set the
+   exam details, and press **Generate my exam**. Take it right away, or
+   find it later in **My exams**.
 
-3. **Make your own quiz.** Open `questions.json` and replace the questions,
-   or load any bank in the same format from the start screen. The format is:
+3. **Or take the demo.** In **My exams**, press **Take the demo exam** —
+   10 verified questions on C pointers and linked lists, no key needed.
 
-   ```json
-   {
-     "title": "My Quiz",
-     "subtitle": "A short line shown under the title",
-     "questions": [
-       {
-         "question": "What is 2 + 2?",
-         "code": "optional code snippet shown above the options",
-         "topic": "Arithmetic",
-         "options": ["3", "4", "5", "6"],
-         "answer": 1,
-         "explanation": "2 + 2 is 4. A short reason is more useful than just the letter."
-       }
-     ]
-   }
-   ```
+## Question-bank format
 
-   Rules: `options` needs at least 2 entries, and `answer` is the **0-based**
-   index of the correct option (so `1` means the second option). `code`,
-   `topic`, and `explanation` are optional — but `explanation` is the part
-   that actually teaches, so write it properly, and `topic` is what powers
-   the topic cards.
+Generated and imported exams use the same JSON format:
+
+```json
+{
+  "title": "My Quiz",
+  "subtitle": "A short line shown under the title",
+  "questions": [
+    {
+      "question": "What is 2 + 2?",
+      "code": "optional code snippet shown above the options",
+      "topic": "Arithmetic",
+      "difficulty": "Easy",
+      "options": ["3", "4", "5", "6"],
+      "answer": 1,
+      "explanation": "2 + 2 is 4. A short reason is more useful than just the letter."
+    }
+  ]
+}
+```
+
+Rules: `options` needs at least 2 entries (4 for multiple choice, 2 —
+`"True"` / `"False"` — for True/False), and `answer` is the **0-based**
+index of the correct option (so `1` means the second option). `code`,
+`topic`, `difficulty` and `explanation` are optional — but
+`explanation` is the part that actually teaches, so a good one matters,
+and `topic` is what powers the topic cards.
 
 ## Deploy it free
 
@@ -135,19 +185,21 @@ LICENSE               — MIT
 2. Go to the repo's **Settings → Pages**.
 3. Under "Build and deployment", choose **Deploy from a branch**, branch
    `main`, folder `/ (root)`.
-4. Your quiz is live at `https://<username>.github.io/<repo-name>/` within a
-   minute or two.
+4. Your app is live at `https://<username>.github.io/<repo-name>/` within
+   a minute or two.
 
 It also works as a static site on Netlify Drop, Vercel, or Cloudflare Pages —
-just upload the folder.
+just upload the folder. Note: PDF reading loads pdf.js from cdnjs the
+first time a PDF is added, so that one step needs internet; the demo
+bank and everything else work fully offline once loaded.
 
 ## Contributing
 
-Pull requests are welcome. If you add questions, please keep the same bar as
-the sample bank: every answer checked (run the code when the question has
-code), four options, a `topic`, and a real explanation — not just the correct
-letter. See [CHANGELOG.md](CHANGELOG.md) for what changed in each daily
-update.
+Pull requests are welcome. If you add questions, please keep the same
+bar as the sample bank: every answer checked (run the code when the
+question has code), four options for MCQ, a `topic`, and a real
+explanation — not just the correct letter. See
+[CHANGELOG.md](CHANGELOG.md) for what changed in each update.
 
 ## License
 
