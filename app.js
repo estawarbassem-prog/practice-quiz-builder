@@ -35,10 +35,9 @@
      Model IDs verified 2026-11-20 against the providers' own docs and
      deprecation pages. Model IDs change fast — every model field is
      editable, so a newer model can always be typed in.
-     - Gemini: gemini-2.5-flash is GA (June 2025) and still the stable
-       cheap default. (Google points brand-new projects at its 3.x Flash
-       line; if gemini-2.5-flash ever stops working for a new key, type
-       the current Flash model ID in the same field.)
+     - Gemini: gemini-3.5-flash-lite is the default. Google retires
+       gemini-2.5-flash on 2026-12-01 and serves it only to projects
+       that already used it, so a brand-new key cannot call it.
      - OpenAI: gpt-4o-mini still works, but OpenAI retires it
        2027-01-14 — the field is editable for whatever mini replaces it.
      - Claude: claude-sonnet-4-5 is RETIRED by Anthropic on 2026-11-30,
@@ -48,7 +47,7 @@
     gemini: {
       label: 'Google Gemini', keyLabel: 'Gemini API key',
       keyUrl: 'https://aistudio.google.com/apikey',
-      defaultModel: 'gemini-2.5-flash',
+      defaultModel: 'gemini-3.5-flash-lite',
       needsProxy: false
     },
     openai: {

@@ -64,15 +64,17 @@ there as a card: "Try the demo — no key needed".
 
 | Provider | Default model | Notes |
 |---|---|---|
-| Google Gemini | `gemini-2.5-flash` | Key in the URL (`?key=`), JSON mode. |
+| Google Gemini | `gemini-3.5-flash-lite` | Key in the URL (`?key=`), JSON mode. |
 | OpenAI (ChatGPT) | `gpt-4o-mini` | Chat Completions, `response_format: json_object`. |
 | Anthropic Claude | `claude-sonnet-5-5` | **Needs a CORS proxy** — see below. |
 | Custom (OpenAI-compatible) | `gpt-4o-mini` | Any base URL + model, same shape as OpenAI. |
 
 Model IDs change fast — every model field is editable, so if a
 provider retires a model you can type the new ID in the same field.
-Defaults were verified on 2026-11-20: `gemini-2.5-flash` is GA and
-stable; `gpt-4o-mini` still works but OpenAI retires it in January
+Defaults were verified on 2026-11-20: `gemini-3.5-flash-lite` is the
+Gemini default — Google retires `gemini-2.5-flash` on 2026-12-01 and
+serves it only to projects that already used it, so a brand-new key
+cannot call it; `gpt-4o-mini` still works but OpenAI retires it in January
 2027; `claude-sonnet-4-5` is retired by Anthropic on 2026-11-30, so
 the Claude default is its named replacement `claude-sonnet-5-5` —
 do not use `claude-sonnet-4-5` after that date.

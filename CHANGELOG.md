@@ -4,6 +4,14 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-20 — Fix: Gemini default model
+
+- **Gemini default is now `gemini-3.5-flash-lite`** — Google retires
+  `gemini-2.5-flash` on 2026-12-01 and serves it only to projects that
+  already used it, so a brand-new API key cannot call the old default.
+  Requests to the old model would have auto-rerouted from Dec 1, but
+  the new-key block hits first, so the default had to move now.
+
 ## 2026-11-20 — Radical rebuild: AI exam generator (QuizForge)
 
 - **New name, new vision: QuizForge** — "Turn any material into
