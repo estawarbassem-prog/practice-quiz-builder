@@ -136,31 +136,31 @@
 
   function validate(data) {
     if (!data || !Array.isArray(data.questions) || data.questions.length === 0)
-      throw new Error('The file must have a non-empty "questions" array.');
+      throw new Error(t('valNoQuestions'));
     data.questions.forEach(function (q, i) {
-      var n = 'Question ' + (i + 1);
+      var n = i + 1;
       if (typeof q.question !== 'string' || !q.question)
-        throw new Error(n + ' is missing its "question" text.');
+        throw new Error(t('valNoQText', { n: n }));
       if (!Array.isArray(q.options) || q.options.length < 2)
-        throw new Error(n + ' needs at least 2 options.');
+        throw new Error(t('valOptions', { n: n }));
       if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= q.options.length)
-        throw new Error(n + ' has an "answer" index out of range.');
+        throw new Error(t('valAnswerRange', { n: n }));
       if (q.topic !== undefined && typeof q.topic !== 'string')
-        throw new Error(n + ' has a "topic" that is not text.');
+        throw new Error(t('valTopic', { n: n }));
       if (q.explanation !== undefined && typeof q.explanation !== 'string')
-        throw new Error(n + ' has an "explanation" that is not text.');
+        throw new Error(t('valExplanation', { n: n }));
       if (q.code !== undefined && typeof q.code !== 'string')
-        throw new Error(n + ' has a "code" snippet that is not text.');
+        throw new Error(t('valCode', { n: n }));
       if (q.difficulty !== undefined && typeof q.difficulty !== 'string')
-        throw new Error(n + ' has a "difficulty" that is not text.');
+        throw new Error(t('valDifficulty', { n: n }));
     });
   }
 
   function scoreMessage(pct) {
-    if (pct >= 90) return 'Excellent — exam ready. 🎉';
-    if (pct >= 70) return 'Solid. Re-read the explanations for the ones you missed.';
-    if (pct >= 50) return 'Getting there — the explanations are the real lesson, read them twice.';
-    return 'Keep practicing — work through the explanations, then try again.';
+    if (pct >= 90) return t('scoreExcellent');
+    if (pct >= 70) return t('scoreSolid');
+    if (pct >= 50) return t('scoreGetting');
+    return t('scoreKeep');
   }
 
   /* ---------- persistence ---------- */
@@ -293,6 +293,17 @@
     }
   }
 
+  /* Stored exam values stay English internally (they feed the AI prompt);
+     these map them to the UI language for display only. */
+  function localizedDifficulty(d) {
+    var m = { Easy: 'diffEasy', Medium: 'diffMedium', Hard: 'diffHard', Mixed: 'diffMixed' };
+    return m[d] ? t(m[d]) : d;
+  }
+
+  function localizedLanguage(l) {
+    return l === 'Arabic' ? t('langOptArabic') : t('langOptEnglish');
+  }
+
   /* ---------- views / navigation ---------- */
 
   function setView(v) {
@@ -306,12 +317,31 @@
     window.scrollTo({ top: 0 });
   }
 
-  /* Phase 1 i18n: re-render the current non-quiz view after a language
-     switch (called by setLang in i18n.js). During a quiz run the screen
-     keeps its strings until the next navigation — Phase 2. */
+  /* Phase 2 i18n: re-render the current view after a language switch
+     (called by setLang in i18n.js). During a quiz run the attempt state
+     is preserved: renderQuestion() rebuilds the screen from `run`, and
+     the per-question countdown is restored so the switch does not reset
+     the timer. */
   window.__qfRerender = function () {
     if (currentView === 'create') renderWizard();
     else if (currentView === 'library') renderLibrary();
+    else if (currentView === 'quiz') {
+      if (run) {
+        var savedLeft = run.perQLeft;
+        renderQuestion();
+        if (run) {
+          run.perQLeft = savedLeft;
+          /* renderQuestion() restarts the countdown chip at full time —
+             put the saved value back so the display matches the timer. */
+          var chip = document.getElementById('timer-perq');
+          if (chip) {
+            chip.textContent = fmtTime(Math.max(savedLeft, 0));
+            var w = chip.closest('.tchip');
+            if (w) w.classList.toggle('low', savedLeft <= 10);
+          }
+        }
+      } else showStart();
+    }
   };
 
   function wireNav() {
@@ -538,7 +568,7 @@
         pushMaterial({ name: name, size: file.size, kind: 'text', chars: text.length, pages: 0 }, text);
         resolve();
       };
-      reader.onerror = function () { reject(new Error('Could not read ' + name + '. Try again.')); };
+      reader.onerror = function () { reject(new Error(t('errReadFile', { name: name }))); };
       reader.readAsText(file);
     });
   }
@@ -563,7 +593,7 @@
           lib.unshift({
             id: 'bank-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
             title: data.title || file.name.replace(/\.json$/i, ''),
-            subtitle: data.subtitle || (data.questions.length + ' questions — imported bank'),
+            subtitle: data.subtitle || t('libImportedBank', { n: data.questions.length }),
             date: new Date().toISOString().slice(0, 10),
             count: data.questions.length,
             provider: 'import',
@@ -580,7 +610,7 @@
           resolve();
         }
       };
-      reader.onerror = function () { reject(new Error('Could not read ' + file.name + '. Try again.')); };
+      reader.onerror = function () { reject(new Error(t('errReadFile', { name: file.name }))); };
       reader.readAsText(file);
     });
   }
@@ -597,11 +627,11 @@
       var s = document.createElement('script');
       s.src = PDFJS_URL;
       s.onload = function () {
-        if (!window.pdfjsLib) { reject(new Error('pdf.js loaded but did not initialise.')); return; }
+        if (!window.pdfjsLib) { reject(new Error(t('errPdfJsInit'))); return; }
         window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
         resolve(window.pdfjsLib);
       };
-      s.onerror = function () { reject(new Error('Could not load the PDF reader (pdf.js) — check your internet connection and try again, or paste the text instead.')); };
+      s.onerror = function () { reject(new Error(t('errPdfJsLoad'))); };
       document.head.appendChild(s);
     });
     return pdfJsPromise;
@@ -633,9 +663,10 @@
       });
     }).catch(function (e) {
       material.pdfFailed = true;
+      var msg = t('errReadFileDetail', { name: file.name, detail: e.message });
       var note = document.getElementById('pdf-note');
-      if (note) note.textContent = 'Could not read ' + file.name + ': ' + e.message;
-      throw e;
+      if (note) note.textContent = msg;
+      throw new Error(msg);
     });
   }
 
@@ -792,17 +823,17 @@
 
   function renderStepSettings(wrap) {
     var card = el('section', 'card');
-    card.appendChild(el('p', 'kicker', 'Step 3 of 4 · Exam settings'));
-    card.appendChild(el('h2', null, 'How should the exam look?'));
+    card.appendChild(el('p', 'kicker', t('kicker3')));
+    card.appendChild(el('h2', null, t('s3Title')));
 
     var titleInput = document.createElement('input');
     titleInput.type = 'text';
     titleInput.id = 'ex-title';
     titleInput.className = 'input';
-    titleInput.placeholder = 'e.g. Biology — Photosynthesis';
+    titleInput.placeholder = t('s3TitlePh');
     titleInput.value = wiz.title;
     titleInput.addEventListener('input', function () { wiz.title = titleInput.value; saveWizard(); });
-    card.appendChild(fieldRow('Exam title / subject', titleInput, ''));
+    card.appendChild(fieldRow(t('s3TitleLabel'), titleInput, ''));
 
     var countInput = document.createElement('input');
     countInput.type = 'number';
@@ -814,10 +845,10 @@
       var v = parseInt(countInput.value, 10);
       if (!isNaN(v)) { wiz.count = Math.max(5, Math.min(50, v)); countInput.value = String(wiz.count); saveWizard(); }
     });
-    card.appendChild(fieldRow('Number of questions (5–50)', countInput, ''));
+    card.appendChild(fieldRow(t('s3CountLabel'), countInput, ''));
 
     var typesRow = el('div', 'field');
-    typesRow.appendChild(el('span', 'field-label', 'Question types'));
+    typesRow.appendChild(el('span', 'field-label', t('s3TypesLabel')));
     var mcqLbl = el('label', 'set-row');
     var mcq = document.createElement('input');
     mcq.type = 'checkbox'; mcq.checked = wiz.types.mcq;
@@ -827,7 +858,7 @@
       saveWizard();
     });
     mcqLbl.appendChild(mcq);
-    mcqLbl.appendChild(el('span', null, 'Multiple choice (4 options)'));
+    mcqLbl.appendChild(el('span', null, t('s3Mcq')));
     typesRow.appendChild(mcqLbl);
     var tfLbl = el('label', 'set-row');
     var tf = document.createElement('input');
@@ -838,42 +869,42 @@
       saveWizard();
     });
     tfLbl.appendChild(tf);
-    tfLbl.appendChild(el('span', null, 'True / False (2 options)'));
+    tfLbl.appendChild(el('span', null, t('s3Tf')));
     typesRow.appendChild(tfLbl);
     card.appendChild(typesRow);
 
     var diffSel = document.createElement('select');
     diffSel.id = 'ex-diff';
     diffSel.className = 'input';
-    ['Easy', 'Medium', 'Hard', 'Mixed'].forEach(function (d) {
+    [['Easy', 'diffEasy'], ['Medium', 'diffMedium'], ['Hard', 'diffHard'], ['Mixed', 'diffMixed']].forEach(function (pair) {
       var o = document.createElement('option');
-      o.value = d; o.textContent = d;
-      if (wiz.difficulty === d) o.selected = true;
+      o.value = pair[0]; o.textContent = t(pair[1]);
+      if (wiz.difficulty === pair[0]) o.selected = true;
       diffSel.appendChild(o);
     });
     diffSel.addEventListener('change', function () { wiz.difficulty = diffSel.value; saveWizard(); });
-    card.appendChild(fieldRow('Difficulty', diffSel, ''));
+    card.appendChild(fieldRow(t('s3Diff'), diffSel, ''));
 
     var langSel = document.createElement('select');
     langSel.id = 'ex-lang';
     langSel.className = 'input';
-    ['English', 'Arabic'].forEach(function (l) {
+    [['English', 'langOptEnglish'], ['Arabic', 'langOptArabic']].forEach(function (pair) {
       var o = document.createElement('option');
-      o.value = l; o.textContent = l;
-      if (wiz.language === l) o.selected = true;
+      o.value = pair[0]; o.textContent = t(pair[1]);
+      if (wiz.language === pair[0]) o.selected = true;
       langSel.appendChild(o);
     });
     langSel.addEventListener('change', function () { wiz.language = langSel.value; saveWizard(); });
-    card.appendChild(fieldRow('Language', langSel, ''));
+    card.appendChild(fieldRow(t('s3Lang'), langSel, ''));
 
     var focusTa = document.createElement('textarea');
     focusTa.id = 'ex-focus';
     focusTa.className = 'input textarea';
     focusTa.rows = 3;
-    focusTa.placeholder = 'e.g. Focus on chapter 3, skip proofs, include the light-dependent reactions…';
+    focusTa.placeholder = t('s3FocusPh');
     focusTa.value = wiz.focus;
     focusTa.addEventListener('input', function () { wiz.focus = focusTa.value; saveWizard(); });
-    card.appendChild(fieldRow('Focus notes (optional)', focusTa, 'Anything the exam should emphasise or skip.'));
+    card.appendChild(fieldRow(t('s3FocusLabel'), focusTa, t('s3FocusHint')));
 
     var perqLbl = el('label', 'set-row');
     var perq = document.createElement('input');
@@ -884,31 +915,31 @@
       saveSettings(); saveWizard();
     });
     perqLbl.appendChild(perq);
-    perqLbl.appendChild(el('span', null, 'Per-question countdown during the exam (uses the seconds from Settings)'));
+    perqLbl.appendChild(el('span', null, t('s3PerQ')));
     var perqRow = el('div', 'field');
     perqRow.appendChild(perqLbl);
     card.appendChild(perqRow);
 
     wrap.appendChild(card);
-    wizardNav(wrap, { back: 2, next: 4, nextLabel: 'Continue to generate →' });
+    wizardNav(wrap, { back: 2, next: 4, nextLabel: t('toGenerate') });
   }
 
   /* ----- Step 4: generate ----- */
 
   function renderStepGenerate(wrap) {
     var card = el('section', 'card');
-    card.appendChild(el('p', 'kicker', 'Step 4 of 4 · Generate'));
-    card.appendChild(el('h2', null, 'Ready to generate your exam?'));
+    card.appendChild(el('p', 'kicker', t('kicker4')));
+    card.appendChild(el('h2', null, t('s4Title')));
     var sum = el('div', 'gen-summary');
     sum.innerHTML =
-      '<div><b>Material:</b> ' + esc(materialChars().toLocaleString()) + ' characters' +
-      (material.pdfPages ? ' · ' + material.pdfPages + ' PDF pages' : '') + '</div>' +
-      '<div><b>Provider:</b> ' + esc(PROVIDERS[byok.provider].label) + ' · ' + esc(effectiveModel()) + '</div>' +
-      '<div><b>Exam:</b> ' + esc(wiz.title || '(untitled)') + ' · ' + wiz.count + ' questions · ' +
-      esc(questionTypeSummary()) + ' · ' + esc(wiz.difficulty) + ' · ' + esc(wiz.language) + '</div>';
+      '<div><b>' + esc(t('s4Material')) + '</b> ' + esc(materialChars().toLocaleString()) + ' ' + esc(t('s4Chars')) +
+      (material.pdfPages ? ' · ' + material.pdfPages + ' ' + esc(t('s4PdfPages')) : '') + '</div>' +
+      '<div><b>' + esc(t('s4Provider')) + '</b> ' + esc(PROVIDERS[byok.provider].label) + ' · ' + esc(effectiveModel()) + '</div>' +
+      '<div><b>' + esc(t('s4Exam')) + '</b> ' + esc(wiz.title || t('s4Untitled')) + ' · ' + wiz.count + ' ' + esc(t('s4QuestionsLabel')) + ' · ' +
+      esc(questionTypeSummary()) + ' · ' + esc(localizedDifficulty(wiz.difficulty)) + ' · ' + esc(localizedLanguage(wiz.language)) + '</div>';
     card.appendChild(sum);
 
-    var genBtn = el('button', 'btn btn-primary btn-big', '⚡ Generate my exam');
+    var genBtn = el('button', 'btn btn-primary btn-big', t('s4Generate'));
     genBtn.id = 'gen-btn';
     genBtn.addEventListener('click', function () { generateExam(); });
     var btnRow = el('div', 'btnrow');
@@ -936,9 +967,9 @@
 
   function questionTypeSummary() {
     var parts = [];
-    if (wiz.types.mcq) parts.push('Multiple choice');
-    if (wiz.types.tf) parts.push('True/False');
-    return parts.join(' + ') || 'Multiple choice';
+    if (wiz.types.mcq) parts.push(t('typeMcqShort'));
+    if (wiz.types.tf) parts.push(t('typeTfShort'));
+    return parts.join(' + ') || t('typeMcqShort');
   }
 
   function showGenError(msg) {
@@ -950,7 +981,7 @@
       var retry = document.createElement('button');
       retry.className = 'btn btn-secondary btn-small';
       retry.style.marginTop = '8px';
-      retry.textContent = '↻ Retry generation';
+      retry.textContent = t('s4Retry');
       retry.addEventListener('click', function () { generateExam(); });
       box.appendChild(retry);
     }
@@ -969,17 +1000,17 @@
   function plainError(e) {
     var msg = (e && e.message) || String(e || 'Unknown error');
     if (/401|unauthenticated|invalid api key|incorrect api key|invalid x-api-key/i.test(msg))
-      return 'Your API key was rejected by the provider. Check the key (Step 2) and try again — make sure you copied the whole key with no extra spaces.';
+      return t('errKey');
     if (/402|insufficient_quota|quota|billing|exceeded/i.test(msg))
-      return 'The provider refused the request: out of credits or quota. Check your billing / usage on the provider’s site, then try again.';
+      return t('errQuota');
     if (/429|rate limit|too many requests/i.test(msg))
-      return 'The provider rate-limited the request (too many requests). Wait a minute and try again.';
+      return t('errRate');
     if (/404|not found|model_not_found/i.test(msg))
-      return 'The model "' + effectiveModel() + '" was not found by the provider. It may have been retired — try a newer model ID in Step 2.';
+      return t('errModel', { model: effectiveModel() });
     if (/timed out|timeout/i.test(msg))
-      return 'The request timed out. Check your connection and try again.';
+      return t('errTimeout');
     if (/Failed to fetch|NetworkError|network|CORS|cors/i.test(msg))
-      return 'Could not reach the provider. Check your internet connection — and for Claude, make sure a CORS proxy is set (Step 2).';
+      return t('errNetwork');
     return msg;
   }
 
@@ -993,7 +1024,7 @@
       return res;
     }).catch(function (e) {
       clearTimeout(timer);
-      if (e && e.name === 'AbortError') throw new Error('The request timed out after 2 minutes.');
+      if (e && e.name === 'AbortError') throw new Error(t('errTimeoutLong'));
       throw e;
     });
   }
@@ -1010,17 +1041,16 @@
     try {
       data = JSON.parse(text);
     } catch (e) {
-      throw new Error('The AI replied with text that is not valid JSON' +
-        (partLabel ? ' (' + partLabel + ')' : '') +
-        '. Nothing was saved. Press Retry — it usually works on the second try.');
+      throw new Error(t('errBadJson', { label: partLabel ? ' (' + partLabel + ')' : '' }));
     }
     if (Array.isArray(data)) data = { questions: data };
     try {
       validate(data);
     } catch (e) {
-      throw new Error('The AI’s reply did not match the question format' +
-        (partLabel ? ' (' + partLabel + ')' : '') + ': ' + e.message +
-        ' Nothing was saved. Press Retry.');
+      throw new Error(t('errBadFormat', {
+        label: partLabel ? ' (' + partLabel + ')' : '',
+        detail: e.message
+      }));
     }
     return data.questions;
   }
@@ -1031,11 +1061,9 @@
     var provider = byok.provider;
     var model = effectiveModel();
     var key = byok.apiKey;
-    if (!key) return Promise.reject(new Error('No API key saved. Add one in Step 2.'));
+    if (!key) return Promise.reject(new Error(t('errNoKey')));
     if (provider === 'claude' && !(byok.proxyUrl || '').trim()) {
-      return Promise.reject(new Error(
-        'Claude’s API blocks direct calls from a browser page, so QuizForge cannot call it without a CORS proxy. ' +
-        'Add a CORS proxy URL in Step 2 (it must forward to https://api.anthropic.com and pass the x-api-key header), or switch to Gemini or OpenAI.'));
+      return Promise.reject(new Error(t('errClaudeProxy')));
     }
 
     if (provider === 'gemini') {
@@ -1053,7 +1081,7 @@
         var text = data && data.candidates && data.candidates[0] &&
           data.candidates[0].content && data.candidates[0].content.parts &&
           data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-        if (!text) throw new Error('Gemini returned an empty reply. Press Retry.');
+        if (!text) throw new Error(t('errEmptyReply', { who: 'Gemini' }));
         return text;
       });
     }
@@ -1072,7 +1100,7 @@
       }).then(function (res) { return readProviderResponse(res, provider === 'custom' ? 'Custom provider' : 'OpenAI'); })
       .then(function (data) {
         var text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-        if (!text) throw new Error('The provider returned an empty reply. Press Retry.');
+        if (!text) throw new Error(t('errEmptyReply', { who: provider === 'custom' ? 'Custom provider' : 'OpenAI' }));
         return text;
       });
     }
@@ -1095,7 +1123,7 @@
     }).then(function (res) { return readProviderResponse(res, 'Claude'); })
     .then(function (data) {
       var text = data && data.content && data.content[0] && data.content[0].text;
-      if (!text) throw new Error('Claude returned an empty reply. Press Retry.');
+      if (!text) throw new Error(t('errEmptyReply', { who: 'Claude' }));
       return text;
     });
   }
@@ -1172,8 +1200,8 @@
     if (genState.busy) return;
     clearGenError();
     var fullText = (material.text + (material.pasted ? '\n\n' + material.pasted : '')).trim();
-    if (!fullText) { showGenError('Add some material first (Step 1) — upload a file or paste text.'); return; }
-    if (!byok.apiKey) { showGenError('Add your API key first (Step 2).'); return; }
+    if (!fullText) { showGenError(t('errNoMaterial')); return; }
+    if (!byok.apiKey) { showGenError(t('errNeedKey')); return; }
     genState.busy = true;
     var btn = document.getElementById('gen-btn');
     if (btn) btn.disabled = true;
@@ -1189,7 +1217,7 @@
     var chain = Promise.resolve();
     chunks.forEach(function (chunk, i) {
       chain = chain.then(function () {
-        genState.progress = 'Generating part ' + (i + 1) + ' of ' + chunks.length + '…';
+        genState.progress = t('s4Generating', { i: i + 1, n: chunks.length });
         if (prog) prog.textContent = genState.progress;
         var label = chunks.length > 1 ? 'part ' + (i + 1) + ' of ' + chunks.length + ' of the material' : '';
         return callProvider(buildPrompt(chunk, perChunk[i], label), perChunk[i], 'gen');
@@ -1209,11 +1237,16 @@
         return true;
       });
       shuffle(deduped);
-      var title = (wiz.title || '').trim() || 'Generated exam';
+      var title = (wiz.title || '').trim() || t('genDefaultTitle');
       var bank = {
         title: title,
-        subtitle: deduped.length + ' questions · generated with ' + PROVIDERS[byok.provider].label +
-          ' (' + effectiveModel() + ') · ' + wiz.difficulty + ' · ' + wiz.language,
+        subtitle: t('genSub', {
+          n: deduped.length,
+          provider: PROVIDERS[byok.provider].label,
+          model: effectiveModel(),
+          difficulty: localizedDifficulty(wiz.difficulty),
+          language: localizedLanguage(wiz.language)
+        }),
         questions: deduped
       };
       validate(bank);
@@ -1234,12 +1267,12 @@
       if (prog) prog.textContent = '';
       var ok = document.getElementById('gen-success');
       if (ok) {
-        ok.textContent = '✓ Your exam is ready: ' + deduped.length + ' questions. It was saved to My exams.';
+        ok.textContent = t('s4Ready', { n: deduped.length });
         ok.classList.add('show');
         var take = document.createElement('button');
         take.className = 'btn btn-primary btn-big';
         take.style.marginTop = '10px';
-        take.textContent = 'Take the exam now →';
+        take.textContent = t('s4TakeNow');
         take.addEventListener('click', function () { loadBank(bank); });
         ok.appendChild(take);
       }
@@ -1260,16 +1293,14 @@
     app.innerHTML = '';
     var wrap = el('div');
     var head = el('section', 'card');
-    head.appendChild(el('p', 'kicker', 'My exams'));
-    head.appendChild(el('h2', null, 'Your saved exams'));
-    head.appendChild(el('p', 'hero-text',
-      'Exams you generated or imported live here, on this device only. ' +
-      'Take one, export it as JSON to share, or delete it.'));
+    head.appendChild(el('p', 'kicker', t('libKicker')));
+    head.appendChild(el('h2', null, t('libTitle')));
+    head.appendChild(el('p', 'hero-text', t('libHero')));
     var row = el('div', 'btnrow');
-    var createBtn = el('button', 'btn btn-primary', '✦ Create a new exam');
+    var createBtn = el('button', 'btn btn-primary', t('libCreate'));
     createBtn.addEventListener('click', function () { setView('create'); });
     row.appendChild(createBtn);
-    var impLbl = el('label', 'file-label', '📂 Import exam (.json)');
+    var impLbl = el('label', 'file-label', t('libImport'));
     var impInput = document.createElement('input');
     impInput.type = 'file';
     impInput.accept = '.json,application/json';
@@ -1288,11 +1319,11 @@
     // Demo bank card — no key needed
     if (sampleQuiz) {
       var demo = el('section', 'card lib-card demo-card');
-      demo.appendChild(el('p', 'kicker', 'Try the demo — no key needed'));
-      demo.appendChild(el('h3', null, sampleQuiz.title || 'Sample exam'));
-      demo.appendChild(el('p', 'muted', sampleQuiz.subtitle || (sampleQuiz.questions.length + ' questions')));
+      demo.appendChild(el('p', 'kicker', t('libDemoKicker')));
+      demo.appendChild(el('h3', null, sampleQuiz.title || t('libDemoTitle')));
+      demo.appendChild(el('p', 'muted', sampleQuiz.subtitle || t('qCount', { n: sampleQuiz.questions.length })));
       var drow = el('div', 'btnrow');
-      var takeDemo = el('button', 'btn btn-primary', 'Take the demo exam →');
+      var takeDemo = el('button', 'btn btn-primary', t('libDemoTake'));
       takeDemo.addEventListener('click', function () { loadBank(sampleQuiz); });
       drow.appendChild(takeDemo);
       demo.appendChild(drow);
@@ -1302,23 +1333,23 @@
     var lib = loadLibrary();
     if (!lib.length) {
       var empty = el('section', 'card');
-      empty.appendChild(el('p', 'muted', 'No exams saved yet. Generate your first one from the Create exam tab — upload any material, add your AI key, and go.'));
+      empty.appendChild(el('p', 'muted', t('libEmpty')));
       wrap.appendChild(empty);
     }
     lib.forEach(function (entry) {
       var card = el('section', 'card lib-card');
       card.appendChild(el('h3', null, entry.title));
       card.appendChild(el('p', 'muted',
-        entry.count + ' questions · ' + entry.date +
-        (entry.provider && entry.provider !== 'import' ? ' · ' + entry.provider + (entry.model ? ' (' + entry.model + ')' : '') : ' · imported')));
+        t('qCount', { n: entry.count }) + ' · ' + entry.date +
+        (entry.provider && entry.provider !== 'import' ? ' · ' + entry.provider + (entry.model ? ' (' + entry.model + ')' : '') : ' · ' + t('libImported'))));
       var r = el('div', 'btnrow');
-      var take = el('button', 'btn btn-primary', 'Take →');
+      var take = el('button', 'btn btn-primary', t('libTake'));
       take.addEventListener('click', function () { loadBank(entry.bank); });
       r.appendChild(take);
-      var exp = el('button', 'btn btn-secondary', 'Export JSON');
+      var exp = el('button', 'btn btn-secondary', t('libExport'));
       exp.addEventListener('click', function () { exportBank(entry); });
       r.appendChild(exp);
-      var del = el('button', 'btn btn-secondary', 'Delete');
+      var del = el('button', 'btn btn-secondary', t('libDelete'));
       del.addEventListener('click', function () {
         saveLibrary(loadLibrary().filter(function (x) { return x.id !== entry.id; }));
         renderLibrary();
@@ -1343,7 +1374,7 @@
         lib.unshift({
           id: 'imp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
           title: data.title || file.name.replace(/\.json$/i, ''),
-          subtitle: data.subtitle || (data.questions.length + ' questions — imported bank'),
+          subtitle: data.subtitle || t('libImportedBank', { n: data.questions.length }),
           date: new Date().toISOString().slice(0, 10),
           count: data.questions.length,
           provider: 'import',
@@ -1354,8 +1385,7 @@
         renderLibrary();
       } catch (e) {
         if (errBox) {
-          errBox.textContent = 'Could not import that file: ' + e.message +
-            ' Check the format in the README (questions array, options, and a 0-based "answer" index).';
+          errBox.textContent = t('libImportErr', { msg: e.message + t('libImportHint') });
           errBox.classList.add('show');
         }
       }
@@ -1363,7 +1393,7 @@
     reader.onerror = function () {
       var errBox = document.getElementById('import-error');
       if (errBox) {
-        errBox.textContent = 'Could not read that file. Try picking the .json file again.';
+        errBox.textContent = t('libReadErr');
         errBox.classList.add('show');
       }
     };
@@ -1408,11 +1438,11 @@
     var sum = document.getElementById('settings-summary');
     if (!sum) return;
     sum.innerHTML = '';
-    sum.appendChild(document.createTextNode('Shuffle: '));
-    sum.appendChild(el('b', null, settings.shuffle ? 'On' : 'Off'));
-    sum.appendChild(document.createTextNode('  ·  Per-question timer: '));
+    sum.appendChild(document.createTextNode(t('sumShuffle')));
+    sum.appendChild(el('b', null, settings.shuffle ? t('on') : t('off')));
+    sum.appendChild(document.createTextNode('  ·  ' + t('sumPerQ')));
     sum.appendChild(el('b', null, settings.perQTimer
-      ? 'On (' + settings.perQSeconds + 's)' : 'Off'));
+      ? t('sumPerQOn', { n: settings.perQSeconds }) : t('off')));
   }
 
   function wireSettingsPanel() {
@@ -1537,25 +1567,23 @@
     buildTopics();
 
     var backRow = el('div', 'btnrow back-row');
-    var back = el('button', 'btn btn-secondary btn-small', '← Back to My exams');
+    var back = el('button', 'btn btn-secondary btn-small', t('quizBack'));
     back.addEventListener('click', function () { setView('library'); });
     backRow.appendChild(back);
     app.appendChild(backRow);
 
     var hero = el('section', 'card hero');
-    hero.appendChild(el('p', 'kicker', quiz.subtitle || 'Practice exam'));
-    hero.appendChild(el('h2', null, quiz.title || 'Practice Quiz'));
-    hero.appendChild(el('p', 'hero-text',
-      'Answer one question at a time — every answer comes with a clear explanation.'));
+    hero.appendChild(el('p', 'kicker', quiz.subtitle || t('quizDefaultSub')));
+    hero.appendChild(el('h2', null, quiz.title || t('quizDefaultTitle')));
+    hero.appendChild(el('p', 'hero-text', t('quizHero')));
     var stats = el('div', 'stats');
-    stats.appendChild(statChip(quiz.questions.length + ' questions'));
-    stats.appendChild(statChip(topics.length + (topics.length === 1 ? ' topic' : ' topics')));
+    stats.appendChild(statChip(t('qCount', { n: quiz.questions.length })));
+    stats.appendChild(statChip(t('quizTopicsLabel', { n: topics.length })));
     var best = loadBest();
     if (best && best.bank === (quiz.title || 'Practice Quiz')) {
-      stats.appendChild(statChip('🏆 Best: ' + best.score + '/' + best.total +
-        ' (' + best.pct + '%)', 'stat-best'));
+      stats.appendChild(statChip(t('quizBest', { score: best.score, total: best.total, pct: best.pct }), 'stat-best'));
     } else {
-      stats.appendChild(statChip('No attempts yet'));
+      stats.appendChild(statChip(t('quizNoAttempts')));
     }
     hero.appendChild(stats);
     if (note) hero.appendChild(el('p', 'bank-note', note));
@@ -1563,19 +1591,19 @@
 
     var topicsWrap = el('div', 'topics');
     var all = ['All'].concat(topics);
-    all.forEach(function (t) {
-      var n = t === 'All' ? quiz.questions.length
-        : quiz.questions.filter(function (q) { return (q.topic || 'General') === t; }).length;
-      var card = el('button', 'topic-card' + (selectedTopic === t ? ' selected' : ''));
+    all.forEach(function (topic) {
+      var n = topic === 'All' ? quiz.questions.length
+        : quiz.questions.filter(function (q) { return (q.topic || 'General') === topic; }).length;
+      var card = el('button', 'topic-card' + (selectedTopic === topic ? ' selected' : ''));
       card.type = 'button';
       var ic = el('span', 'topic-icon');
-      ic.innerHTML = topicIcon(t);
+      ic.innerHTML = topicIcon(topic);
       card.appendChild(ic);
-      card.appendChild(el('span', 'topic-name', t === 'All' ? 'All topics' : t));
-      card.appendChild(el('span', 'topic-count', n + (n === 1 ? ' question' : ' questions')));
-      card.appendChild(el('span', 'topic-go', 'Start →'));
+      card.appendChild(el('span', 'topic-name', topic === 'All' ? t('quizAllTopics') : topic));
+      card.appendChild(el('span', 'topic-count', t('qCount', { n: n })));
+      card.appendChild(el('span', 'topic-go', t('quizStartTopic')));
       card.addEventListener('click', function () {
-        selectedTopic = t;
+        selectedTopic = topic;
         startQuiz();
       });
       topicsWrap.appendChild(card);
@@ -1584,7 +1612,7 @@
 
     var startCard = el('section', 'card');
     var row = el('div', 'btnrow');
-    var start = el('button', 'btn btn-primary btn-big', 'Start quiz →');
+    var start = el('button', 'btn btn-primary btn-big', t('quizStart'));
     start.id = 'start-quiz-btn';
     start.addEventListener('click', function () { startQuiz(); });
     row.appendChild(start);
@@ -1593,26 +1621,22 @@
     var sum = el('p', 'settings-summary');
     sum.id = 'settings-summary';
     startCard.appendChild(sum);
-    var changeBtn = el('button', 'btn btn-secondary btn-small', 'Change settings');
+    var changeBtn = el('button', 'btn btn-secondary btn-small', t('quizChangeSettings'));
     changeBtn.addEventListener('click', function () { openSettingsPanel(); });
     var changeRow = el('div', 'btnrow');
     changeRow.style.marginTop = '4px';
     changeRow.appendChild(changeBtn);
     startCard.appendChild(changeRow);
 
-    startCard.appendChild(el('div', 'hint',
-      'Shortcuts during the quiz: keys 1–4 pick an answer, Enter moves to the next question.'));
+    startCard.appendChild(el('div', 'hint', t('quizShortcuts')));
     app.appendChild(startCard);
 
     var how = el('section', 'card how');
-    how.appendChild(el('h2', null, 'How it works'));
+    how.appendChild(el('h2', null, t('quizHowTitle')));
     var steps = el('div', 'how-steps');
-    steps.appendChild(howStep('1', 'Pick a topic',
-      'Choose All topics or one topic card — or generate a new exam from any material.'));
-    steps.appendChild(howStep('2', 'Answer & learn',
-      'Get instant feedback with a “Why” explanation after every answer.'));
-    steps.appendChild(howStep('3', 'Review & retry',
-      'See your full review at the end and re-try only the ones you missed.'));
+    steps.appendChild(howStep('1', t('quizHow1T'), t('quizHow1')));
+    steps.appendChild(howStep('2', t('quizHow2T'), t('quizHow2')));
+    steps.appendChild(howStep('3', t('quizHow3T'), t('quizHow3')));
     how.appendChild(steps);
     app.appendChild(how);
 
@@ -1660,7 +1684,7 @@
     var score = run.answers.filter(function (a) { return a && a.correct; }).length;
     var total = run.qIndexes.length;
     var p = document.getElementById('progress-text');
-    if (p) p.textContent = 'Answered ' + done + ' / ' + total + ' · Score ' + score;
+    if (p) p.textContent = t('quizAnswered', { done: done, total: total, score: score });
     var f = document.getElementById('progress-fill');
     if (f) f.style.width = (total ? Math.round(done / total * 100) : 0) + '%';
   }
@@ -1674,7 +1698,7 @@
 
     var top = el('div', 'card quiz-top');
     var row1 = el('div', 'top-row');
-    row1.appendChild(el('span', 'counter', 'Question ' + (pos + 1) + ' of ' + run.qIndexes.length));
+    row1.appendChild(el('span', 'counter', t('quizCounter', { pos: pos + 1, total: run.qIndexes.length })));
     var timers = el('span', 'timers');
     var totalChip = el('span', 'tchip');
     totalChip.innerHTML = icon('clock', 15);
@@ -1745,16 +1769,18 @@
       var ex = el('div', 'explain show');
       var verdict;
       if (state.timedOut) {
-        verdict = el('div', 'verdict timeout', '⏰ Time ran out — the answer is ' +
-          LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })] + '.');
+        verdict = el('div', 'verdict timeout', t('quizTimeout', {
+          letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+        }));
       } else {
         verdict = el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
-          state.correct ? '✓ Correct!'
-            : '✗ Not quite — the answer is ' +
-              LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })] + '.');
+          state.correct ? t('quizCorrect')
+            : t('quizNotQuite', {
+              letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+            }));
       }
       ex.appendChild(verdict);
-      ex.appendChild(el('b', null, 'Why: '));
+      ex.appendChild(el('b', null, t('quizWhy')));
       ex.appendChild(document.createTextNode(q.explanation));
       card.appendChild(ex);
     }
@@ -1763,14 +1789,13 @@
     if (state) {
       var row = el('div', 'btnrow');
       var last = pos === run.qIndexes.length - 1;
-      var next = el('button', 'btn btn-primary btn-big', last ? 'See my results ✓' : 'Next question →');
+      var next = el('button', 'btn btn-primary btn-big', last ? t('quizResultsBtn') : t('quizNext'));
       next.id = 'next-btn';
       next.addEventListener('click', function () { next.blur(); nextQuestion(); });
       row.appendChild(next);
       app.appendChild(row);
     } else {
-      app.appendChild(el('div', 'hint', 'Keys: 1–' +
-        Math.min(run.optOrders[pos].length, 6) + ' to answer · Enter for next'));
+      app.appendChild(el('div', 'hint', t('quizKeysHint', { n: Math.min(run.optOrders[pos].length, 6) })));
     }
 
     if (!state && settings.perQTimer) startPerQTimer();
@@ -1809,8 +1834,8 @@
   function ringSVG(score, total, pct) {
     var C = 2 * Math.PI * 70;
     var off = (C * (1 - pct / 100)).toFixed(1);
-    return '<svg class="ring" viewBox="0 0 160 160" width="150" height="150" role="img" aria-label="Score ' +
-      score + ' out of ' + total + '">' +
+    return '<svg class="ring" viewBox="0 0 160 160" width="150" height="150" role="img" aria-label="' +
+      esc(t('ringAria', { score: score, total: total })) + '">' +
       '<circle class="ring-track" cx="80" cy="80" r="70"/>' +
       '<circle class="ring-fill" cx="80" cy="80" r="70" stroke-dasharray="' + C.toFixed(1) +
       '" stroke-dashoffset="' + off + '" transform="rotate(-90 80 80)"/>' +
@@ -1828,8 +1853,8 @@
 
     app.innerHTML = '';
     var card = el('section', 'card results-card');
-    card.appendChild(el('p', 'kicker', 'Results'));
-    card.appendChild(el('h2', null, 'Your score'));
+    card.appendChild(el('p', 'kicker', t('resKicker')));
+    card.appendChild(el('h2', null, t('resTitle')));
 
     var ringWrap = el('div', 'ring-wrap');
     var ringBox = el('div', 'ring-box');
@@ -1839,16 +1864,16 @@
     side.appendChild(el('div', 'big-pct', pct + '%'));
     var secs = Math.floor((Date.now() - run.startedAt) / 1000);
     side.appendChild(el('p', null, scoreMessage(pct)));
-    side.appendChild(el('p', 'muted', 'Finished in ' + fmtTime(secs) + ' · ' + total + ' questions.'));
+    side.appendChild(el('p', 'muted', t('resFinished', { time: fmtTime(secs), n: total })));
     var best = loadBest();
     if (best && best.bank === (quiz.title || 'Practice Quiz')) {
       side.appendChild(el('div', 'best',
-        '🏆 Best score on this quiz: ' + best.score + '/' + best.total + ' (' + best.pct + '%)'));
+        t('resBest', { score: best.score, total: best.total, pct: best.pct })));
     }
     ringWrap.appendChild(side);
     card.appendChild(ringWrap);
 
-    var reviewTitle = el('h2', 'review-title', 'Review');
+    var reviewTitle = el('h2', 'review-title', t('resReview'));
     card.appendChild(reviewTitle);
     run.qIndexes.forEach(function (qi, pos) {
       var q = quiz.questions[qi];
@@ -1857,7 +1882,7 @@
       var correctIdx = opts.findIndex(function (o) { return o.correct; });
       var item = el('div', 'review-item');
       var status = el('span', 'status-chip ' + ((a && a.correct) ? 'ok' : 'no'),
-        a && a.correct ? '✓ Correct' : (a && a.timedOut ? '⏰ Time out' : '✗ Wrong'));
+        a && a.correct ? t('resCorrect') : (a && a.timedOut ? t('resTimeout') : t('resWrong')));
       item.appendChild(status);
       item.appendChild(el('div', 'rq', (pos + 1) + '. ' + q.question));
       if (q.code) {
@@ -1868,23 +1893,23 @@
       var yours = a && a.picked !== null ? opts[a.picked].text : null;
       var line = el('div', 'ra');
       if (a && a.correct) {
-        line.appendChild(document.createTextNode('Your answer: '));
+        line.appendChild(document.createTextNode(t('resYourAnswer')));
         line.appendChild(el('span', 'yours ok', '✓ ' + yours));
       } else if (a && a.timedOut) {
-        line.appendChild(document.createTextNode('Your answer: '));
-        line.appendChild(el('span', 'yours', '⏰ No answer — time ran out'));
-        line.appendChild(document.createTextNode('  ·  Correct: '));
+        line.appendChild(document.createTextNode(t('resYourAnswer')));
+        line.appendChild(el('span', 'yours', t('resNoAnswerTimeout')));
+        line.appendChild(document.createTextNode(t('resCorrectIs')));
         line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + opts[correctIdx].text));
       } else {
-        line.appendChild(document.createTextNode('Your answer: '));
-        line.appendChild(el('span', 'yours', '✗ ' + (yours !== null ? yours : 'No answer')));
-        line.appendChild(document.createTextNode('  ·  Correct: '));
+        line.appendChild(document.createTextNode(t('resYourAnswer')));
+        line.appendChild(el('span', 'yours', '✗ ' + (yours !== null ? yours : t('resNoAnswer'))));
+        line.appendChild(document.createTextNode(t('resCorrectIs')));
         line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + opts[correctIdx].text));
       }
       item.appendChild(line);
       if (q.explanation) {
         var rex = el('div', 'rex');
-        rex.appendChild(el('b', null, 'Why: '));
+        rex.appendChild(el('b', null, t('quizWhy')));
         rex.appendChild(document.createTextNode(q.explanation));
         item.appendChild(rex);
       }
@@ -1897,14 +1922,14 @@
       return !a || !a.correct;
     });
     if (wrongIndexes.length > 0) {
-      var retryWrong = el('button', 'btn btn-primary', '↻ Retry wrong answers only (' + wrongIndexes.length + ')');
+      var retryWrong = el('button', 'btn btn-primary', t('resRetryWrong', { n: wrongIndexes.length }));
       retryWrong.addEventListener('click', function () { startQuiz(wrongIndexes); });
       row.appendChild(retryWrong);
     }
-    var again = el('button', 'btn btn-secondary', 'Try again (all)');
+    var again = el('button', 'btn btn-secondary', t('resAgain'));
     again.addEventListener('click', function () { startQuiz(); });
     row.appendChild(again);
-    var home = el('button', 'btn btn-secondary', 'Back to topics');
+    var home = el('button', 'btn btn-secondary', t('resBackTopics'));
     home.addEventListener('click', function () { showStart(); });
     row.appendChild(home);
     card.appendChild(row);
@@ -1944,12 +1969,11 @@
   function showLoadError(err) {
     var box = el('div', 'error');
     box.innerHTML =
-      '<b>Could not load questions.json.</b><br>' +
-      'Browsers block loading local files when you open index.html directly ' +
-      '(file://). Run a tiny local server from this folder instead:<br><br>' +
-      '<code>python3 -m http.server 8000</code><br>' +
-      'then open <code>http://localhost:8000</code> in your browser.<br><br>' +
-      'Details: ' + esc(err.message);
+      '<b>' + esc(t('loadErrTitle')) + '</b><br>' +
+      esc(t('loadErrBody')) + '<br><br>' +
+      '<code>' + esc(t('loadErrCmd')) + '</code><br>' +
+      esc(t('loadErrOpen')) + '<br><br>' +
+      esc(t('loadErrDetails')) + esc(err.message);
     app.innerHTML = '';
     app.appendChild(box);
   }

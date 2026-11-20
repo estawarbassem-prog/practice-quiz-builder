@@ -64,12 +64,12 @@ there as a card: "Try the demo — no key needed".
 
 The header has a language toggle (🌐 عربي / English). Switching to
 Arabic flips the whole interface to a right-to-left layout — header,
-navigation, wizard, settings — and remembers your choice on this
-device. The exam *content* language (English/Arabic) is a separate
-choice in Step 3, so you can have an Arabic interface generating an
-English exam, or the other way round. (Part 1 covers the header, the
-settings panel and wizard steps 1–2; steps 3–4, the library, the quiz
-and the results follow in part 2.)
+navigation, wizard, settings, library, quiz and results — and remembers
+your choice on this device. You can switch language even mid-quiz; the
+attempt and the per-question countdown keep running. The exam *content*
+language (English/Arabic) is a separate choice in Step 3, so you can
+have an Arabic interface generating an English exam, or the other way
+round.
 
 ## Supported providers
 

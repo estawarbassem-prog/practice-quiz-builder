@@ -4,6 +4,25 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-20 — Arabic UI, part 2 (complete)
+
+- **Full Arabic coverage** — every remaining screen now goes through
+  `t()`: wizard steps 3–4 (settings, generate + summary), the exam
+  library, the quiz start screen, the quiz run (counter, verdicts,
+  progress), the results + review, and all error messages (provider
+  errors, bad AI replies, file/PDF errors, bank validation).
+- **Language switch mid-quiz** — switching language during a run
+  re-renders the question screen from the attempt state; the
+  per-question countdown is preserved, not reset.
+- **Dictionary grew to ~200 keys** — new keys for the generate summary,
+  generated-bank subtitles, validation errors, timeouts and empty
+  replies. Stored values (difficulty, exam language) stay English
+  internally and are only localised for display.
+- **RTL polish** — kickers no longer letter-spaced or uppercased in
+  Arabic (letter-spacing breaks Arabic joining); progress bar, step
+  indicator, timers and buttons verified to flip correctly at 1280px
+  and 390px.
+
 ## 2026-11-20 — Arabic UI, part 1
 
 - **Language toggle (🌐 عربي / English)** in the header, saved on the

@@ -685,3 +685,6 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
 [dir="rtl"] code,
 [dir="rtl"] .q-code { direction: ltr; text-align: left; }
 [dir="rtl"] .settings-panel .set-row { text-align: right; }
+/* Arabic script must not be letter-spaced (it breaks letter joining) or
+   uppercased — kickers stay readable at their natural weight. */
+[dir="rtl"] .kicker { letter-spacing: 0; text-transform: none; }

@@ -131,6 +131,7 @@
       libCreate: '✦ Create a new exam',
       libImport: '📂 Import exam (.json)',
       libDemoKicker: 'Try the demo — no key needed',
+      libDemoTitle: 'Sample exam',
       libDemoTake: 'Take the demo exam →',
       libEmpty: 'No exams saved yet. Generate your first one from the Create exam tab — upload any material, add your AI key, and go.',
       libTake: 'Take →',
@@ -193,7 +194,40 @@
       loadErrTitle: 'Could not load questions.json.',
       loadErrBody: 'Browsers block loading local files when you open index.html directly (file://). Run a tiny local server from this folder instead:',
       loadErrCmd: 'python3 -m http.server 8000',
-      loadErrOpen: 'then open http://localhost:8000 in your browser.'
+      loadErrOpen: 'then open http://localhost:8000 in your browser.',
+      loadErrDetails: 'Details: ',
+      /* --- Phase 2 additions --- */
+      s4Chars: 'characters',
+      s4PdfPages: 'PDF pages',
+      typeMcqShort: 'Multiple choice',
+      typeTfShort: 'True/False',
+      genSub: '{n} questions · generated with {provider} ({model}) · {difficulty} · {language}',
+      genDefaultTitle: 'Generated exam',
+      s4Ready: '✓ Your exam is ready: {n} questions. It was saved to My exams.',
+      libImported: 'imported',
+      libImportedBank: '{n} questions — imported bank',
+      libImportHint: ' Check the format in the README (questions array, options, and a 0-based "answer" index).',
+      sumPerQOn: 'On ({n}s)',
+      quizKeysHint: 'Keys: 1–{n} to answer · Enter for next',
+      ringAria: 'Score {score} out of {total}',
+      resFinished: 'Finished in {time} · {n} questions.',
+      errTimeout: 'The request timed out. Check your connection and try again.',
+      errTimeoutLong: 'The request timed out after 2 minutes.',
+      errEmptyReply: '{who} returned an empty reply. Press Retry.',
+      errBadJson: 'The AI replied with text that is not valid JSON{label}. Nothing was saved. Press Retry — it usually works on the second try.',
+      errBadFormat: 'The AI’s reply did not match the question format{label}: {detail} Nothing was saved. Press Retry.',
+      errReadFile: 'Could not read {name}. Try again.',
+      errReadFileDetail: 'Could not read {name}: {detail}',
+      errPdfJsInit: 'pdf.js loaded but did not initialise.',
+      errPdfJsLoad: 'Could not load the PDF reader (pdf.js) — check your internet connection and try again, or paste the text instead.',
+      valNoQuestions: 'The file must have a non-empty "questions" array.',
+      valNoQText: 'Question {n} is missing its "question" text.',
+      valOptions: 'Question {n} needs at least 2 options.',
+      valAnswerRange: 'Question {n} has an "answer" index out of range.',
+      valTopic: 'Question {n} has a "topic" that is not text.',
+      valExplanation: 'Question {n} has an "explanation" that is not text.',
+      valCode: 'Question {n} has a "code" snippet that is not text.',
+      valDifficulty: 'Question {n} has a "difficulty" that is not text.'
     },
     ar: {
       /* --- header / nav / chrome --- */
@@ -317,6 +351,7 @@
       libCreate: '✦ إنشاء امتحان جديد',
       libImport: '📂 استيراد امتحان (.json)',
       libDemoKicker: 'جرّب النسخة التجريبية — لا حاجة إلى مفتاح',
+      libDemoTitle: 'امتحان تجريبي',
       libDemoTake: 'ابدأ الامتحان التجريبي ←',
       libEmpty: 'لا توجد امتحانات محفوظة بعد. ولّد أول امتحان من تبويب إنشاء امتحان — ارفع مادة، وأضف مفتاح AI، وانطلق.',
       libTake: 'ابدأ ←',
@@ -379,7 +414,40 @@
       loadErrTitle: 'تعذّر تحميل questions.json.',
       loadErrBody: 'المتصفحات تمنع تحميل الملفات المحلية عند فتح index.html مباشرة (file://). شغّل خادمًا محليًا صغيرًا من هذا المجلد بدلًا من ذلك:',
       loadErrCmd: 'python3 -m http.server 8000',
-      loadErrOpen: 'ثم افتح http://localhost:8000 في متصفحك.'
+      loadErrOpen: 'ثم افتح http://localhost:8000 في متصفحك.',
+      loadErrDetails: 'التفاصيل: ',
+      /* --- Phase 2 additions --- */
+      s4Chars: 'حرفًا',
+      s4PdfPages: 'صفحات PDF',
+      typeMcqShort: 'اختيار من متعدد',
+      typeTfShort: 'صح/خطأ',
+      genSub: '{n} أسئلة · تم توليدها باستخدام {provider} ({model}) · {difficulty} · {language}',
+      genDefaultTitle: 'امتحان مولَّد',
+      s4Ready: '✓ امتحانك جاهز: {n} أسئلة. تم حفظه في امتحاناتي.',
+      libImported: 'مستورد',
+      libImportedBank: '{n} أسئلة — بنك مستورد',
+      libImportHint: ' تحقق من الصيغة في README (مصفوفة أسئلة، وخيارات، وفهرس "answer" يبدأ من 0).',
+      sumPerQOn: 'مفعّل ({n} ث)',
+      quizKeysHint: 'المفاتيح: 1–{n} للإجابة · Enter للانتقال إلى التالي',
+      ringAria: 'النتيجة {score} من {total}',
+      resFinished: 'انتهيت في {time} · {n} أسئلة.',
+      errTimeout: 'انتهت مهلة الطلب. تحقق من اتصالك وحاول مرة أخرى.',
+      errTimeoutLong: 'انتهت مهلة الطلب بعد دقيقتين.',
+      errEmptyReply: 'أعاد {who} ردًا فارغًا. اضغط إعادة المحاولة.',
+      errBadJson: 'ردّ الذكاء الاصطناعي بنص ليس JSON صالحًا{label}. لم يُحفظ شيء. اضغط إعادة المحاولة — عادةً ما تنجح في المحاولة الثانية.',
+      errBadFormat: 'لم يطابق ردّ الذكاء الاصطناعي صيغة الأسئلة{label}: {detail} لم يُحفظ شيء. اضغط إعادة المحاولة.',
+      errReadFile: 'تعذّر قراءة {name}. حاول مرة أخرى.',
+      errReadFileDetail: 'تعذّر قراءة {name}: {detail}',
+      errPdfJsInit: 'تم تحميل pdf.js لكنه لم يبدأ.',
+      errPdfJsLoad: 'تعذّر تحميل قارئ PDF ‏(pdf.js) — تحقق من اتصالك بالإنترنت وحاول مرة أخرى، أو الصق النص بدلًا من ذلك.',
+      valNoQuestions: 'يجب أن يحتوي الملف على مصفوفة "questions" غير فارغة.',
+      valNoQText: 'السؤال {n} يفتقد نص "question".',
+      valOptions: 'السؤال {n} يحتاج إلى خيارين على الأقل.',
+      valAnswerRange: 'السؤال {n} يحتوي على فهرس "answer" خارج النطاق.',
+      valTopic: 'السؤال {n} يحتوي على "topic" ليس نصًا.',
+      valExplanation: 'السؤال {n} يحتوي على "explanation" ليس نصًا.',
+      valCode: 'السؤال {n} يحتوي على مقتطف "code" ليس نصًا.',
+      valDifficulty: 'السؤال {n} يحتوي على "difficulty" ليس نصًا.'
     }
   };
 
@@ -425,9 +493,13 @@
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'ar' ? 'rtl' : 'ltr';
     applyStaticStrings();
-    /* Re-render the current non-quiz view (create/library) so the wizard
-       picks up the new language. During a quiz run the screen keeps its
-       strings until the next navigation — Phase 2. */
+    /* The dark-mode label is set by applyDark() in app.js, not by
+       data-i18n — re-apply it here so it follows the language too. */
+    var dl = document.getElementById('dark-label');
+    if (dl) dl.textContent = document.body.classList.contains('dark') ? t('light') : t('dark');
+    /* Re-render the current view (create/library/quiz) so every screen
+       picks up the new language. During a quiz run the attempt state is
+       preserved — __qfRerender keeps the per-question countdown. */
     if (window.__qfRerender) { try { window.__qfRerender(); } catch (e) {} }
   }
 
