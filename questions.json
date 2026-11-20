@@ -129,8 +129,46 @@
       ],
       "question": "Which swap actually swaps the caller's variables?",
       "topic": "Pointers"
+    },
+    {
+      "question": "Match each pointer term with its correct meaning.",
+      "type": "matching",
+      "pairs": [
+        { "left": "int *p", "right": "A pointer that holds the address of an int" },
+        { "left": "&x", "right": "The address of x" },
+        { "left": "*p", "right": "The value stored at the address p points to" }
+      ],
+      "topic": "Pointers",
+      "difficulty": "Easy",
+      "explanation": "The * in a declaration makes p a pointer, & takes an address, and * in an expression follows the pointer to its value."
+    },
+    {
+      "question": "Put these steps in the correct order to insert 5 at the head of the list 10 -> 20 -> 30.",
+      "type": "ordering",
+      "items": [
+        "Create a new node holding 5",
+        "Point the new node's next at the current head (10)",
+        "Move head to point at the new node"
+      ],
+      "topic": "Linked List",
+      "difficulty": "Easy",
+      "explanation": "The new node must link to the old list before head moves — otherwise the rest of the list is lost."
+    },
+    {
+      "question": "Write a function sum(a, b) that returns the sum of its two numbers.",
+      "type": "coding",
+      "language": "JavaScript",
+      "starterCode": "function sum(a, b) {\n  // write your code here\n}",
+      "tests": [
+        { "input": "sum(2, 3)", "expected": "5" },
+        { "input": "sum(-1, 1)", "expected": "0" },
+        { "input": "sum(10, 20)", "expected": "30" }
+      ],
+      "topic": "Functions",
+      "difficulty": "Easy",
+      "explanation": "The function must return a + b for any two numbers — the tests check three different pairs, including a negative number."
     }
   ],
-  "subtitle": "10 multiple-choice questions · Data Structures · Level: second-year CS",
+  "subtitle": "10 multiple-choice questions + 1 coding question + 1 matching + 1 ordering · Data Structures · Level: second-year CS",
   "title": "CS.212 — Pointers & Linked Lists"
 }

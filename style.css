@@ -213,6 +213,38 @@ body.dark .ic-moon { display: none; }
   padding: 5px 13px;
 }
 .stat-best { background: var(--green-bg); color: var(--green); border-color: var(--green); }
+.stat-worst { background: var(--red-bg); color: var(--red); border-color: var(--red); }
+
+/* ---------- stats dashboard (Feature 5) ---------- */
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+.stat-card {
+  background: var(--accent-soft);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  box-shadow: 3px 3px 0 var(--shadow-color);
+  padding: 14px 12px;
+  text-align: center;
+}
+.stat-num { font-size: 1.5rem; font-weight: 800; color: var(--accent-text); line-height: 1.2; }
+.stat-label { font-size: .82rem; font-weight: 700; color: var(--muted); margin-top: 4px; }
+.stats-sec { font-size: 1.15rem; margin-bottom: 12px; }
+.stats-callouts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.topic-row { margin-bottom: 14px; }
+.topic-row:last-child { margin-bottom: 0; }
+.topic-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.topic-name { font-weight: 800; }
+.topic-meta { font-size: .85rem; color: var(--muted); white-space: nowrap; }
+.topic-bar { height: 14px; background: var(--track); border: 2px solid var(--ink); border-radius: 999px; overflow: hidden; }
+.topic-fill { height: 100%; background: var(--btn-bg); border-radius: 999px; }
+.recent-list { display: flex; flex-direction: column; }
+.recent-item {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 10px 2px; border-bottom: 1px solid var(--track);
+}
+.recent-item:last-child { border-bottom: none; }
+.recent-date { font-size: .85rem; color: var(--muted); white-space: nowrap; }
+.recent-title { flex: 1; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-score { font-weight: 800; color: var(--accent-text); white-space: nowrap; }
 
 .topics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
 .topic-card {
@@ -270,6 +302,24 @@ body.dark .ic-moon { display: none; }
 input[type="file"] { display: none; }
 
 .bank-note { font-size: .88rem; color: var(--muted); margin-top: 10px; text-align: center; }
+
+/* ---------- share via link ---------- */
+.share-note { margin: 10px auto 0; max-width: 560px; font-size: .9rem; color: var(--muted); text-align: center; }
+.share-note.warn { color: var(--ink); background: var(--accent-soft); border: 2px solid var(--ink); border-radius: 10px; padding: 10px 12px; }
+.share-link-input { margin: 8px 0; direction: ltr; text-align: left; font-size: .85rem; }
+.share-toast {
+  position: fixed; left: 50%; bottom: 24px; z-index: 50;
+  transform: translate(-50%, 20px);
+  max-width: min(92vw, 560px); padding: 12px 16px;
+  border: 2px solid var(--ink); border-radius: 10px;
+  background: var(--ink); color: var(--card);
+  font-size: .95rem; text-align: center; cursor: pointer;
+  box-shadow: 4px 4px 0 var(--shadow-color);
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.share-toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+
 .bank-error {
   display: none;
   background: var(--red-bg);
@@ -316,6 +366,17 @@ input[type="file"] { display: none; }
 }
 .tchip.perq { color: var(--accent-text); }
 .tchip.perq.low { color: var(--red); border-color: var(--red); }
+.tchip.strict { color: var(--accent-text); }
+.tchip.strict.low { color: var(--red); border-color: var(--red); }
+
+.strict-row { justify-content: center; margin-top: 4px; font-weight: 800; }
+.strict-hint { text-align: center; }
+.strict-badge {
+  display: inline-block; font-size: .8rem; font-weight: 800; color: #fff;
+  background: var(--btn-bg); border: 2px solid var(--ink); border-radius: 999px;
+  padding: 2px 12px; margin-top: 8px;
+}
+.results-card .strict-badge { margin-top: 0; margin-bottom: 10px; }
 
 .progress-wrap { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .progress-wrap .bar { flex: 1; height: 10px; background: var(--track); border: 2px solid var(--ink); border-radius: 99px; overflow: hidden; }
@@ -402,6 +463,97 @@ input[type="file"] { display: none; }
 .verdict.ok { color: var(--green); }
 .verdict.no, .verdict.timeout { color: var(--red); }
 
+/* ---------- essay + fill-in (Feature 6) ---------- */
+
+.free-wrap { display: grid; gap: 10px; }
+.free-wrap .btn { justify-self: start; }
+.essay-input { min-height: 140px; }
+.fill-input { width: 100%; }
+.free-answer {
+  white-space: pre-wrap; overflow-wrap: break-word;
+  background: var(--bg); border: 2px solid var(--ink); border-radius: 10px;
+  padding: 12px 14px; font-size: .95rem; line-height: 1.55;
+}
+.grading-note {
+  background: var(--amber-bg); border: 2px solid var(--amber-border);
+  border-radius: 12px; padding: 12px 14px; font-weight: 700; color: var(--amber-ink);
+}
+.status-chip.pend { color: var(--amber-ink); border-color: var(--amber-border); background: var(--amber-bg); }
+.review-item .ra .free-answer { margin-top: 6px; }
+
+/* ---------- coding questions (Feature 10) ---------- */
+
+.code-wrap { display: grid; gap: 10px; }
+.code-editor {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: .92rem; line-height: 1.55;
+  min-height: 190px; width: 100%;
+  background: var(--code-bg); color: var(--code-ink);
+  direction: ltr; text-align: left;
+  tab-size: 2; white-space: pre; overflow: auto;
+}
+.code-answer { direction: ltr; text-align: left; }
+.code-results { display: grid; gap: 8px; }
+.code-results .verdict { margin-bottom: 0; }
+.test-row {
+  border: 2px solid var(--ink); border-radius: 10px;
+  padding: 10px 12px; font-size: .9rem;
+  background: var(--card);
+}
+.test-row.pass { border-color: var(--green); background: var(--green-bg); }
+.test-row.fail { border-color: var(--red); background: var(--red-bg); }
+.test-verdict { font-weight: 800; margin-bottom: 4px; }
+.test-row.pass .test-verdict { color: var(--green); }
+.test-row.fail .test-verdict { color: var(--red); }
+.test-io {
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: .85rem; line-height: 1.6;
+  direction: ltr; text-align: left;
+  overflow-wrap: break-word; white-space: pre-wrap;
+}
+.print-code-tests { font-size: .88rem; margin: 6px 0 10px; }
+[dir="rtl"] .code-editor, [dir="rtl"] .code-answer, [dir="rtl"] .test-io { direction: ltr; text-align: left; }
+
+/* ---------- matching + ordering questions (Feature 11) ---------- */
+
+.match-wrap, .order-wrap { display: grid; gap: 10px; }
+.match-wrap .btn, .order-wrap .btn.btn-primary { justify-self: start; }
+.match-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 12px; align-items: center;
+  border: 2px solid var(--ink); border-radius: 10px;
+  padding: 10px 12px; background: var(--card);
+}
+.match-row.match-head {
+  border: none; background: transparent; padding: 0 12px;
+  font-weight: 800; font-size: .9rem; color: var(--muted);
+}
+.match-left { font-weight: 700; overflow-wrap: break-word; }
+.match-select { width: 100%; min-width: 0; }
+.match-pick { font-weight: 700; overflow-wrap: break-word; }
+.match-pick.ok { color: var(--green); }
+.match-pick.no { color: var(--red); }
+.order-list { list-style: none; display: grid; gap: 8px; }
+.order-item {
+  display: flex; gap: 10px; align-items: center;
+  border: 2px solid var(--ink); border-radius: 10px;
+  padding: 10px 12px; background: var(--card);
+}
+.order-text { flex: 1; min-width: 0; font-weight: 700; overflow-wrap: break-word; }
+.order-text.ok { color: var(--green); }
+.order-text.no { color: var(--red); }
+.order-btns { display: flex; gap: 6px; flex: 0 0 auto; }
+.order-btns .btn { padding: 4px 10px; font-size: 1rem; line-height: 1.2; }
+.pair-line { font-size: .95rem; margin-top: 4px; overflow-wrap: break-word; }
+.pair-line.ok { color: var(--green); }
+.pair-line.no { color: var(--red); }
+
+@media (max-width: 520px) {
+  .match-row { grid-template-columns: 1fr; gap: 6px; }
+  .match-row.match-head { display: none; }
+  .order-item { flex-wrap: wrap; }
+}
+
 /* ---------- results screen ---------- */
 
 .results-card { text-align: center; }
@@ -433,6 +585,102 @@ input[type="file"] { display: none; }
 .status-chip.ok { color: var(--green); border-color: var(--green); background: var(--green-bg); }
 .status-chip.no { color: var(--red); border-color: var(--red); background: var(--red-bg); }
 
+/* ---------- smart review (spaced repetition) ---------- */
+
+.rev-streak {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  border-color: var(--accent-text);
+}
+.rev-streak-line {
+  margin-top: 10px;
+  font-size: .92rem;
+  font-weight: 700;
+  background: var(--amber-bg);
+  border: 2px solid var(--amber-border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  text-align: start;
+}
+.rev-streak-line.mastered {
+  background: var(--green-bg);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+/* ---------- flashcards (quick revision) ---------- */
+
+.fc-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+.fc-counter { font-weight: 700; font-size: 1.02rem; }
+.fc-scene { perspective: 1200px; margin-top: 12px; }
+.fc-card {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: inherit;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+.fc-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform .45s ease;
+}
+.fc-inner.flipped { transform: rotateY(180deg); }
+.fc-face {
+  grid-area: 1 / 1;
+  min-height: 280px;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  background: var(--card);
+  border: 2px solid var(--ink);
+  border-radius: var(--radius);
+  box-shadow: 4px 4px 0 var(--shadow-color);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-wrap: break-word;
+}
+.fc-face.fc-back {
+  transform: rotateY(180deg);
+  background: var(--accent-soft);
+}
+.fc-q { font-size: 1.15rem; font-weight: 700; line-height: 1.5; }
+.fc-code {
+  direction: ltr;
+  text-align: left;
+  background: var(--code-bg);
+  color: var(--code-ink);
+  border: 2px solid var(--track);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: .92rem;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.fc-answer { font-size: 1.1rem; font-weight: 700; color: var(--green); line-height: 1.5; }
+.fc-meta { font-size: .92rem; font-weight: 700; }
+.fc-why { font-size: .92rem; color: var(--muted); background: var(--amber-bg); border-radius: 8px; padding: 8px 10px; }
+.fc-hint { margin-top: auto; padding-top: 8px; font-size: .85rem; color: var(--muted); }
+.fc-nav {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+.fc-nav .btn:disabled { opacity: .45; cursor: default; transform: none; box-shadow: 3px 3px 0 var(--shadow-color); }
+
 /* ---------- load error / footer ---------- */
 
 .error {
@@ -457,11 +705,16 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
   body { padding: 8px; }
   .card { padding: 14px; }
   .topics { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .topic-meta { white-space: normal; text-align: end; }
+  .recent-item { flex-wrap: wrap; gap: 4px 10px; }
   .how-steps { grid-template-columns: 1fr; }
   .brand-text h1 { font-size: 1.02rem; }
   .brand-text p { display: none; }
   .hero h2 { font-size: 1.3rem; }
   .q-card { padding: 14px; }
+  .fc-face { min-height: 240px; padding: 14px; }
+  .fc-q { font-size: 1.05rem; }
   .ring-side { text-align: center; }
   .appbar { top: 8px; }
   #dark-label { display: none; }
@@ -590,6 +843,21 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
 .dz-small { font-size: .86rem; color: var(--muted); margin-top: 4px; }
 
 .file-list { margin: 8px 0; }
+
+/* spreadsheet import (Feature 13) — the CSV format stays LTR even
+   in the Arabic UI, so it reads the same in both languages. */
+.sheet-box { margin-top: 18px; border-top: 2px dashed var(--border); padding-top: 14px; }
+.sheet-box h3 { font-size: 1.02rem; margin-bottom: 4px; }
+.sheet-format {
+  background: var(--code-bg); color: var(--code-ink);
+  border: 2px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; font-size: .85rem; line-height: 1.5;
+  overflow-x: auto; direction: ltr; text-align: left;
+  white-space: pre-wrap; word-break: break-word; margin: 8px 0;
+}
+.sheet-file-row { margin-top: 10px; }
+.sheet-skip { margin: 8px 0 0; padding-inline-start: 18px; font-size: .85rem; text-align: start; }
+.sheet-skip li { margin-bottom: 2px; }
 .file-row {
   display: flex; align-items: center; gap: 10px;
   background: var(--card);
@@ -666,6 +934,16 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
   .step-name { font-size: .8rem; }
 }
 
+/* ---------- material summary (Feature 9) ---------- */
+
+.sum-row { text-align: start; }
+.sum-list { margin: 6px 0 12px; padding-inline-start: 22px; line-height: 1.6; }
+.sum-list li { margin: 4px 0; }
+.sum-sec { font-size: 1.02rem; margin: 14px 0 6px; }
+.sum-defs { margin: 6px 0 12px; display: grid; gap: 6px; }
+.sum-defs dt { font-weight: 800; color: var(--accent-text); }
+.sum-defs dd { margin: 0 0 6px; line-height: 1.55; }
+
 /* ---------- RTL (Arabic UI) ---------- */
 /* Flex layouts flip automatically with dir="rtl". These rules fix the
    few physical properties: the settings panel anchoring, left-aligned
@@ -680,6 +958,7 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
 [dir="rtl"] .back-row,
 [dir="rtl"] .field,
 [dir="rtl"] .how-step,
+[dir="rtl"] .sum-card,
 [dir="rtl"] .q-card { text-align: right; }
 [dir="rtl"] pre,
 [dir="rtl"] code,
@@ -688,3 +967,158 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
 /* Arabic script must not be letter-spaced (it breaks letter joining) or
    uppercased — kickers stay readable at their natural weight. */
 [dir="rtl"] .kicker { letter-spacing: 0; text-transform: none; }
+[dir="rtl"] .fc-face { text-align: right; }
+
+/* ---------- Print / PDF export ---------- */
+/* The print sheet is built by buildPrintSheet() in app.js and lives
+   outside .wrap. On screen it is hidden; in print it is the only thing
+   shown. Everything is forced black-on-white so dark mode never leaks
+   into a printout, and each question is kept on one page where possible. */
+#print-sheet { display: none; }
+
+@media print {
+  @page { margin: 16mm; }
+  html, body { background: #fff !important; color: #000 !important; }
+  body.dark, body.dark .wrap { background: #fff !important; color: #000 !important; }
+  .wrap { display: none !important; }
+  .share-toast { display: none !important; }
+  #print-sheet {
+    display: block !important;
+    background: #fff !important;
+    color: #000 !important;
+    font-size: 12pt;
+    line-height: 1.5;
+    text-align: start;
+  }
+  #print-sheet h1 { font-size: 18pt; margin: 0 0 4px; color: #000 !important; }
+  #print-sheet h2.print-sec {
+    font-size: 14pt;
+    margin: 18px 0 10px;
+    padding-bottom: 4px;
+    border-bottom: 2px solid #000;
+    color: #000 !important;
+  }
+  .print-sub { font-size: 11pt; color: #333 !important; margin: 0 0 4px; }
+  .print-meta { font-size: 10pt; color: #555 !important; margin: 0 0 6px; }
+  .print-q {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin: 0 0 14px;
+  }
+  .print-qtext { font-weight: 700; margin-bottom: 4px; }
+  .print-opts {
+    list-style: none;
+    margin: 0;
+    padding-inline-start: 18px;
+  }
+  .print-opts li { margin: 2px 0; }
+  .print-blank { margin: 8px 0 2px; }
+  .print-line {
+    height: 22px;
+    border-bottom: 1px solid #999;
+  }
+  .print-code {
+    direction: ltr;
+    text-align: left;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 10.5pt;
+    background: #f2f2f2 !important;
+    border: 1px solid #999;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 6px 0;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+  }
+  .print-key {
+    break-before: page;
+    page-break-before: always;
+  }
+  .print-keyrow {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin: 0 0 10px;
+  }
+  .print-keyans { font-weight: 700; }
+  .print-keywhy { font-size: 11pt; color: #333 !important; }
+  /* --- Printable answer sheet (Feature 15) --- */
+  .ans-info {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin: 12px 0 6px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .ans-field {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    flex: 1 1 160px;
+    font-weight: 700;
+  }
+  .ans-blank { flex: 1; border-bottom: 1px solid #000; min-height: 18px; }
+  .ans-instructions { font-size: 10.5pt; margin: 4px 0 14px; }
+  .ans-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #ddd;
+  }
+  .ans-num { font-weight: 700; flex: none; min-width: 2em; }
+  .ans-bubbles { display: flex; gap: 8px; flex-wrap: wrap; }
+  .ans-bubble {
+    width: 24px;
+    height: 24px;
+    border: 2px solid #000;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11pt;
+    font-weight: 700;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .ans-write { flex: 1; }
+  .ans-type { font-size: 10.5pt; font-weight: 700; margin-bottom: 2px; }
+  .ans-match { display: flex; gap: 24px; flex-wrap: wrap; }
+  .ans-match ol { list-style: none; margin: 0; padding: 0; }
+  .ans-match li { margin: 2px 0; }
+  /* RTL: the sheet follows the page direction (dir=rtl on <html>);
+     code blocks stay LTR above, and logical padding keeps the option
+     list on the correct side. */
+}
+
+/* --- Offline mode / PWA (Feature 14) --- */
+.offline-bar[hidden] { display: none; }
+.offline-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  background: #FFF3D6;
+  border: 2px solid #1E1B16;
+  border-radius: 10px;
+  box-shadow: 3px 3px 0 rgba(30, 27, 22, 0.9);
+  color: #1E1B16;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+.offline-bar::before { content: "📶"; }
+body.dark .offline-bar {
+  background: #3A2E12;
+  border-color: #F3EFE6;
+  box-shadow: 3px 3px 0 rgba(243, 239, 230, 0.35);
+  color: #F3EFE6;
+}
+@media print {
+  .offline-bar { display: none !important; }
+}

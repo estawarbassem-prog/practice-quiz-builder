@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>QuizForge — Turn any material into exams</title>
+<meta name="theme-color" content="#1668E8">
+<link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -21,6 +23,10 @@
       </div>
     </div>
     <div class="appbar-actions">
+      <button class="icon-btn" id="install-btn" type="button" data-i18n-title="installAppTitle" title="Install QuizForge on this device" hidden>
+        <span aria-hidden="true">⬇</span>
+        <span data-i18n="installApp">Install app</span>
+      </button>
       <button class="icon-btn" id="lang-toggle" type="button" title="التبديل إلى العربية">
         <span aria-hidden="true">🌐</span>
         <span id="lang-label">عربي</span>
@@ -36,6 +42,10 @@
       </button>
     </div>
   </header>
+
+  <div class="offline-bar" id="offline-bar" hidden>
+    <span data-i18n="offlineBadge">You are offline — saved exams, quizzes, review and stats still work</span>
+  </div>
 
   <div class="settings-panel" id="settings-panel" hidden>
     <h2 data-i18n="setTitle">Settings</h2>
@@ -58,6 +68,7 @@
 <nav class="view-nav" aria-label="Main views">
   <button class="nav-tab active" id="nav-create" type="button"><span data-i18n="navCreate">✦ Create exam</span></button>
   <button class="nav-tab" id="nav-library" type="button"><span data-i18n="navLibrary">▤ My exams</span> <span class="nav-count" id="nav-lib-count" hidden></span></button>
+  <button class="nav-tab" id="nav-stats" type="button"><span data-i18n="navStats">📊 Stats</span></button>
 </nav>
 
 <div id="app"></div>
