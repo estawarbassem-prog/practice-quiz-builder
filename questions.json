@@ -1,1 +1,136 @@
-{"questions":[{"answer":1,"code":"int x = 5;\nint *p = &x;\n*p = 10;","explanation":"p holds the address of x, so *p = 10 writes through the pointer and changes x itself. p is an address, *p is the value at that address.","options":["5","10","The address of x","Undefined — the code does not compile"],"question":"What is the value of x after this code runs?"},{"answer":1,"code":"int a = 3, b = 7;\nint *p = &a;\np = &b;\n*p = 9;","explanation":"p = &b re-points the pointer at b, so *p = 9 changes b only. a is untouched — reassigning a pointer never changes the old variable it pointed to.","options":["a = 9, b = 7","a = 3, b = 9","a = 9, b = 9","a = 3, b = 7"],"question":"What are the values of a and b after this code runs?"},{"answer":1,"code":"int arr[4] = {10, 20, 30, 40};\nint *p = arr;\np++;","explanation":"p++ on an int* moves one int forward (4 bytes on most systems), not one byte. p now points at arr[1], which is 20.","options":["10","20","11","The address of arr[1]"],"question":"What is the value of *p after this code runs?"},{"answer":1,"code":"int x = 4;\nint *p = &x;\nint **q = &p;\n**q = 8;","explanation":"q points to p, and p points to x. **q follows both levels of indirection, so **q = 8 writes 8 into x.","options":["4","8","The address of p","Undefined behaviour"],"question":"What is the value of x after this code runs?"},{"answer":2,"code":"int *p = new int(5);\ndelete p;\n*p = 10;   // ← this line","explanation":"After delete, p is a dangling pointer: it still holds the old address, but the memory is no longer yours. Writing through it is undefined behaviour — it may crash, or silently corrupt memory.","options":["It safely sets the freed memory to 10","It allocates a new int","Undefined behaviour — p is dangling","Compile error"],"question":"What happens on the marked line?"},{"answer":2,"code":"int *p = nullptr;\ncout << *p;","explanation":"nullptr points nowhere. Dereferencing it is undefined behaviour — in practice the program normally crashes. A null check (if (p != nullptr)) must come first.","options":["It prints 0","It prints the address 0","Crash / undefined behaviour","Compile error"],"question":"What happens when this code runs?"},{"answer":0,"code":"Node* n = new Node(5);\nn->next = head;\nhead = n;","explanation":"The new node points at the old head, then head moves to the new node. No traversal is needed, so inserting at the head is O(1) — unlike inserting at the tail, which is O(n).","options":["5 -> 10 -> 20 -> 30, O(1)","10 -> 20 -> 30 -> 5, O(n)","5 -> 10 -> 20 -> 30, O(n)","10 -> 5 -> 20 -> 30, O(1)"],"question":"A singly linked list holds 10 -> 20 -> 30. You insert 5 at the head. What is the result, and what is the time complexity?"},{"answer":1,"code":"Node* temp = head;\nhead = head->next;   // ← forget this line\ndelete temp;","explanation":"Without moving head first, head still points at the node you delete: the rest of the list becomes unreachable (a memory leak) and head is left dangling. Always relink before you delete.","options":["Nothing — the list is unchanged","The whole list is lost and head points to freed memory","Only the last node is lost","The program will not compile"],"question":"What goes wrong if you forget the line head = head->next; when deleting the head node?"},{"answer":1,"code":"struct Node { int data; Node *next; };\nNode* head; // points at the first node","explanation":"Stop at p != nullptr so the last node — whose next is nullptr — still gets printed. Testing p->next != nullptr stops one node early, and starting at head->next skips the head.","options":["for (p = head; p->next != nullptr; p = p->next)","for (p = head; p != nullptr; p = p->next)","for (p = head; p->next == nullptr; p = p->next)","for (p = head->next; p != nullptr; p = p->next)"],"question":"Which loop prints EVERY node of a singly linked list?"},{"answer":1,"code":"void swap1(int x, int y)   { int t = x; x = y; y = t; }\nvoid swap2(int *x, int *y) { int t = *x; *x = *y; *y = t; }","explanation":"swap1 works on copies — the caller's variables never change. swap2 receives the addresses and writes through them with *x and *y, so the swap survives the call. To change a caller's variable, pass its address.","options":["swap1(a, b)","swap2(&a, &b)","Both of them","Neither of them"],"question":"Which swap actually swaps the caller's variables?"}],"subtitle":"10 multiple-choice questions · Data Structures · Level: second-year CS","title":"CS.212 — Pointers & Linked Lists"}
+{
+  "questions": [
+    {
+      "answer": 1,
+      "code": "int x = 5;\nint *p = &x;\n*p = 10;",
+      "explanation": "p holds the address of x, so *p = 10 writes through the pointer and changes x itself. p is an address, *p is the value at that address.",
+      "options": [
+        "5",
+        "10",
+        "The address of x",
+        "Undefined — the code does not compile"
+      ],
+      "question": "What is the value of x after this code runs?",
+      "topic": "Pointers"
+    },
+    {
+      "answer": 1,
+      "code": "int a = 3, b = 7;\nint *p = &a;\np = &b;\n*p = 9;",
+      "explanation": "p = &b re-points the pointer at b, so *p = 9 changes b only. a is untouched — reassigning a pointer never changes the old variable it pointed to.",
+      "options": [
+        "a = 9, b = 7",
+        "a = 3, b = 9",
+        "a = 9, b = 9",
+        "a = 3, b = 7"
+      ],
+      "question": "What are the values of a and b after this code runs?",
+      "topic": "Pointers"
+    },
+    {
+      "answer": 1,
+      "code": "int arr[4] = {10, 20, 30, 40};\nint *p = arr;\np++;",
+      "explanation": "p++ on an int* moves one int forward (4 bytes on most systems), not one byte. p now points at arr[1], which is 20.",
+      "options": [
+        "10",
+        "20",
+        "11",
+        "The address of arr[1]"
+      ],
+      "question": "What is the value of *p after this code runs?",
+      "topic": "Pointers"
+    },
+    {
+      "answer": 1,
+      "code": "int x = 4;\nint *p = &x;\nint **q = &p;\n**q = 8;",
+      "explanation": "q points to p, and p points to x. **q follows both levels of indirection, so **q = 8 writes 8 into x.",
+      "options": [
+        "4",
+        "8",
+        "The address of p",
+        "Undefined behaviour"
+      ],
+      "question": "What is the value of x after this code runs?",
+      "topic": "Pointers"
+    },
+    {
+      "answer": 2,
+      "code": "int *p = new int(5);\ndelete p;\n*p = 10;   // ← this line",
+      "explanation": "After delete, p is a dangling pointer: it still holds the old address, but the memory is no longer yours. Writing through it is undefined behaviour — it may crash, or silently corrupt memory.",
+      "options": [
+        "It safely sets the freed memory to 10",
+        "It allocates a new int",
+        "Undefined behaviour — p is dangling",
+        "Compile error"
+      ],
+      "question": "What happens on the marked line?",
+      "topic": "Pointers"
+    },
+    {
+      "answer": 2,
+      "code": "int *p = nullptr;\ncout << *p;",
+      "explanation": "nullptr points nowhere. Dereferencing it is undefined behaviour — in practice the program normally crashes. A null check (if (p != nullptr)) must come first.",
+      "options": [
+        "It prints 0",
+        "It prints the address 0",
+        "Crash / undefined behaviour",
+        "Compile error"
+      ],
+      "question": "What happens when this code runs?",
+      "topic": "Pointers"
+    },
+    {
+      "answer": 0,
+      "code": "Node* n = new Node(5);\nn->next = head;\nhead = n;",
+      "explanation": "The new node points at the old head, then head moves to the new node. No traversal is needed, so inserting at the head is O(1) — unlike inserting at the tail, which is O(n).",
+      "options": [
+        "5 -> 10 -> 20 -> 30, O(1)",
+        "10 -> 20 -> 30 -> 5, O(n)",
+        "5 -> 10 -> 20 -> 30, O(n)",
+        "10 -> 5 -> 20 -> 30, O(1)"
+      ],
+      "question": "A singly linked list holds 10 -> 20 -> 30. You insert 5 at the head. What is the result, and what is the time complexity?",
+      "topic": "Linked List"
+    },
+    {
+      "answer": 1,
+      "code": "Node* temp = head;\nhead = head->next;   // ← forget this line\ndelete temp;",
+      "explanation": "Without moving head first, head still points at the node you delete: the rest of the list becomes unreachable (a memory leak) and head is left dangling. Always relink before you delete.",
+      "options": [
+        "Nothing — the list is unchanged",
+        "The whole list is lost and head points to freed memory",
+        "Only the last node is lost",
+        "The program will not compile"
+      ],
+      "question": "What goes wrong if you forget the line head = head->next; when deleting the head node?",
+      "topic": "Linked List"
+    },
+    {
+      "answer": 1,
+      "code": "struct Node { int data; Node *next; };\nNode* head; // points at the first node",
+      "explanation": "Stop at p != nullptr so the last node — whose next is nullptr — still gets printed. Testing p->next != nullptr stops one node early, and starting at head->next skips the head.",
+      "options": [
+        "for (p = head; p->next != nullptr; p = p->next)",
+        "for (p = head; p != nullptr; p = p->next)",
+        "for (p = head; p->next == nullptr; p = p->next)",
+        "for (p = head->next; p != nullptr; p = p->next)"
+      ],
+      "question": "Which loop prints EVERY node of a singly linked list?",
+      "topic": "Linked List"
+    },
+    {
+      "answer": 1,
+      "code": "void swap1(int x, int y)   { int t = x; x = y; y = t; }\nvoid swap2(int *x, int *y) { int t = *x; *x = *y; *y = t; }",
+      "explanation": "swap1 works on copies — the caller's variables never change. swap2 receives the addresses and writes through them with *x and *y, so the swap survives the call. To change a caller's variable, pass its address.",
+      "options": [
+        "swap1(a, b)",
+        "swap2(&a, &b)",
+        "Both of them",
+        "Neither of them"
+      ],
+      "question": "Which swap actually swaps the caller's variables?",
+      "topic": "Pointers"
+    }
+  ],
+  "subtitle": "10 multiple-choice questions · Data Structures · Level: second-year CS",
+  "title": "CS.212 — Pointers & Linked Lists"
+}
