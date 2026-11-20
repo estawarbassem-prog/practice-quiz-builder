@@ -60,6 +60,17 @@ there (on this device only) with Take / Export JSON / Delete. A valid
 `.json` bank can be imported, and the built-in demo bank is always
 there as a card: "Try the demo — no key needed".
 
+## Language — English / العربية
+
+The header has a language toggle (🌐 عربي / English). Switching to
+Arabic flips the whole interface to a right-to-left layout — header,
+navigation, wizard, settings — and remembers your choice on this
+device. The exam *content* language (English/Arabic) is a separate
+choice in Step 3, so you can have an Arabic interface generating an
+English exam, or the other way round. (Part 1 covers the header, the
+settings panel and wizard steps 1–2; steps 3–4, the library, the quiz
+and the results follow in part 2.)
+
 ## Supported providers
 
 | Provider | Default model | Notes |

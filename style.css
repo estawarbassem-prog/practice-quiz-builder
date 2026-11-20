@@ -147,7 +147,7 @@ body {
 .brand-text h1 { font-size: 1.18rem; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .brand-text p { font-size: .82rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-.appbar-actions { display: flex; gap: 8px; margin-left: auto; }
+.appbar-actions { display: flex; gap: 8px; margin-inline-start: auto; }
 
 .icon-btn {
   display: inline-flex;
@@ -459,12 +459,16 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
   .topics { grid-template-columns: 1fr; }
   .how-steps { grid-template-columns: 1fr; }
   .brand-text h1 { font-size: 1.02rem; }
-  .brand-text p { font-size: .76rem; }
+  .brand-text p { display: none; }
   .hero h2 { font-size: 1.3rem; }
   .q-card { padding: 14px; }
   .ring-side { text-align: center; }
   .appbar { top: 8px; }
   #dark-label { display: none; }
+  /* Three header buttons no longer fit next to the brand at phone width:
+     keep icons only (titles still describe them). */
+  #lang-label { display: none; }
+  #settings-btn span:last-child { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -661,3 +665,23 @@ footer { text-align: center; font-size: .8rem; color: var(--muted); margin: 16px
   .steps { grid-template-columns: repeat(2, 1fr); }
   .step-name { font-size: .8rem; }
 }
+
+/* ---------- RTL (Arabic UI) ---------- */
+/* Flex layouts flip automatically with dir="rtl". These rules fix the
+   few physical properties: the settings panel anchoring, left-aligned
+   text blocks, and code blocks (which must stay LTR). */
+[dir="rtl"] .settings-panel { right: auto; left: 0; }
+[dir="rtl"] .topic-card,
+[dir="rtl"] .opt,
+[dir="rtl"] .bank-error,
+[dir="rtl"] .ring-side,
+[dir="rtl"] .review-title,
+[dir="rtl"] .review-item,
+[dir="rtl"] .back-row,
+[dir="rtl"] .field,
+[dir="rtl"] .how-step,
+[dir="rtl"] .q-card { text-align: right; }
+[dir="rtl"] pre,
+[dir="rtl"] code,
+[dir="rtl"] .q-code { direction: ltr; text-align: left; }
+[dir="rtl"] .settings-panel .set-row { text-align: right; }

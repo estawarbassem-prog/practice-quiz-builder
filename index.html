@@ -17,15 +17,19 @@
       </span>
       <div class="brand-text">
         <h1>QuizForge</h1>
-        <p>Turn any material into exams</p>
+        <p data-i18n="brandTag">Turn any material into exams</p>
       </div>
     </div>
     <div class="appbar-actions">
-      <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-haspopup="true" aria-expanded="false" aria-controls="settings-panel">
-        <svg class="ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/></svg>
-        <span>Settings</span>
+      <button class="icon-btn" id="lang-toggle" type="button" title="التبديل إلى العربية">
+        <span aria-hidden="true">🌐</span>
+        <span id="lang-label">عربي</span>
       </button>
-      <button class="icon-btn" id="dark-toggle" type="button" title="Toggle dark mode">
+      <button class="icon-btn" id="settings-btn" type="button" data-i18n-title="settingsTitle" title="Settings" aria-haspopup="true" aria-expanded="false" aria-controls="settings-panel">
+        <svg class="ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/></svg>
+        <span data-i18n="settings">Settings</span>
+      </button>
+      <button class="icon-btn" id="dark-toggle" type="button" data-i18n-title="darkTitle" title="Toggle dark mode">
         <span class="ic-moon"><svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.5 6.5 0 0 0 9.5 9.5z"/></svg></span>
         <span class="ic-sun"><svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2L19 19M19 5l-1.8 1.8M6.8 17.2L5 19"/></svg></span>
         <span id="dark-label">Dark</span>
@@ -34,34 +38,35 @@
   </header>
 
   <div class="settings-panel" id="settings-panel" hidden>
-    <h2>Settings</h2>
+    <h2 data-i18n="setTitle">Settings</h2>
     <label class="set-row">
       <input type="checkbox" id="set-shuffle">
-      <span>Shuffle questions and answer options</span>
+      <span data-i18n="setShuffle">Shuffle questions and answer options</span>
     </label>
     <label class="set-row">
       <input type="checkbox" id="set-perq">
-      <span>Per-question countdown</span>
+      <span data-i18n="setPerQ">Per-question countdown</span>
     </label>
     <label class="set-row">
-      <span>Seconds per question:</span>
+      <span data-i18n="setSeconds">Seconds per question:</span>
       <input type="number" id="set-seconds" min="5" max="600" value="60">
     </label>
-    <p class="set-note">Settings are saved on this device and apply to the next question you start.</p>
+    <p class="set-note" data-i18n="setNote">Settings are saved on this device and apply to the next question you start.</p>
   </div>
 </div>
 
 <nav class="view-nav" aria-label="Main views">
-  <button class="nav-tab active" id="nav-create" type="button">✦ Create exam</button>
-  <button class="nav-tab" id="nav-library" type="button">▤ My exams <span class="nav-count" id="nav-lib-count" hidden></span></button>
+  <button class="nav-tab active" id="nav-create" type="button"><span data-i18n="navCreate">✦ Create exam</span></button>
+  <button class="nav-tab" id="nav-library" type="button"><span data-i18n="navLibrary">▤ My exams</span> <span class="nav-count" id="nav-lib-count" hidden></span></button>
 </nav>
 
 <div id="app"></div>
 
-<footer id="foot">QuizForge — upload any material, bring your own AI key, get an exam. Your key never leaves your browser except to the provider you choose.</footer>
+<footer id="foot" data-i18n="foot">QuizForge — upload any material, bring your own AI key, get an exam. Your key never leaves your browser except to the provider you choose.</footer>
 
 </div>
 
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -209,7 +209,7 @@
     try { dark = localStorage.getItem(LS_DARK) === '1'; } catch (e) {}
     document.body.classList.toggle('dark', dark);
     var lbl = document.getElementById('dark-label');
-    if (lbl) lbl.textContent = dark ? 'Light' : 'Dark';
+    if (lbl) lbl.textContent = dark ? t('light') : t('dark');
   }
 
   /* BYO key: stored ONLY in this browser's localStorage, sent only to the
@@ -306,14 +306,20 @@
     window.scrollTo({ top: 0 });
   }
 
+  /* Phase 1 i18n: re-render the current non-quiz view after a language
+     switch (called by setLang in i18n.js). During a quiz run the screen
+     keeps its strings until the next navigation — Phase 2. */
+  window.__qfRerender = function () {
+    if (currentView === 'create') renderWizard();
+    else if (currentView === 'library') renderLibrary();
+  };
+
   function wireNav() {
     document.getElementById('nav-create').addEventListener('click', function () { setView('create'); });
     document.getElementById('nav-library').addEventListener('click', function () { setView('library'); });
   }
 
   /* ---------- wizard ---------- */
-
-  var STEP_NAMES = ['Upload material', 'Your AI key', 'Exam settings', 'Generate'];
 
   function materialChars() {
     return material.text.length + material.pasted.length;
@@ -325,7 +331,7 @@
 
     // Step indicator
     var steps = el('ol', 'steps');
-    STEP_NAMES.forEach(function (name, i) {
+    [t('step1'), t('step2'), t('step3'), t('step4')].forEach(function (name, i) {
       var li = el('li', 'step' + (i + 1 === wiz.step ? ' current' : '') + (i + 1 < wiz.step ? ' done' : ''));
       li.appendChild(el('span', 'step-dot', String(i + 1)));
       li.appendChild(el('span', 'step-name', name));
@@ -346,12 +352,12 @@
     // opts: {back: step|null, next: step|null, nextLabel, nextDisabled, onNext}
     var row = el('div', 'btnrow wizard-nav');
     if (opts.back) {
-      var back = el('button', 'btn btn-secondary', '← Back');
+      var back = el('button', 'btn btn-secondary', t('back'));
       back.addEventListener('click', function () { wiz.step = opts.back; saveWizard(); renderWizard(); });
       row.appendChild(back);
     }
     if (opts.next) {
-      var next = el('button', 'btn btn-primary btn-big', opts.nextLabel || 'Continue →');
+      var next = el('button', 'btn btn-primary btn-big', opts.nextLabel || t('continue'));
       if (opts.nextDisabled) next.disabled = true;
       next.addEventListener('click', function () {
         if (opts.onNext) opts.onNext();
@@ -374,19 +380,17 @@
 
   function renderStepUpload(wrap) {
     var card = el('section', 'card');
-    card.appendChild(el('p', 'kicker', 'Step 1 of 4 · Upload material'));
-    card.appendChild(el('h2', null, 'What should the exam cover?'));
-    card.appendChild(el('p', 'hero-text',
-      'Upload your PDFs, past exams, summaries — any subject, any material. ' +
-      'Or paste the text below. Everything stays in your browser until you generate.'));
+    card.appendChild(el('p', 'kicker', t('kicker1')));
+    card.appendChild(el('h2', null, t('s1Title')));
+    card.appendChild(el('p', 'hero-text', t('s1Hero')));
 
     var dz = el('div', 'dropzone');
     dz.id = 'dropzone';
     dz.tabIndex = 0;
     dz.setAttribute('role', 'button');
-    dz.setAttribute('aria-label', 'Upload material files');
-    dz.innerHTML = '<div class="dz-big">📄 Drop files here, or <span class="dz-link">browse</span></div>' +
-      '<div class="dz-small">PDF, text (.txt / .md), or a question bank (.json) — multiple files are merged into one material.</div>';
+    dz.setAttribute('aria-label', t('s1DzAria'));
+    dz.innerHTML = '<div class="dz-big">' + t('s1DzBig') + '</div>' +
+      '<div class="dz-small">' + t('s1DzSmall') + '</div>';
     var picker = document.createElement('input');
     picker.type = 'file';
     picker.accept = '.pdf,.txt,.md,.json,application/pdf,text/plain,text/markdown,application/json';
@@ -415,14 +419,14 @@
     list.id = 'file-list';
     card.appendChild(list);
 
-    var pasteLabel = el('label', 'field-label', 'Or paste text directly');
+    var pasteLabel = el('label', 'field-label', t('s1PasteLabel'));
     pasteLabel.htmlFor = 'paste-text';
     card.appendChild(pasteLabel);
     var ta = document.createElement('textarea');
     ta.id = 'paste-text';
     ta.className = 'input textarea';
     ta.rows = 6;
-    ta.placeholder = 'Paste your summary, lecture notes, or chapter text here…';
+    ta.placeholder = t('s1PastePh');
     ta.value = material.pasted;
     ta.addEventListener('input', function () {
       material.pasted = ta.value;
@@ -441,7 +445,7 @@
     wrap.appendChild(card);
     refreshFileList();
     wizardNav(wrap, {
-      back: null, next: 2, nextLabel: 'Continue to your AI key →',
+      back: null, next: 2, nextLabel: t('toKey'),
       onNext: function () { material.pasted = ta.value; }
     });
   }
@@ -458,16 +462,16 @@
       var meta = el('div', 'file-meta');
       meta.appendChild(el('span', 'file-name', f.name));
       var sub = f.kind === 'pdf'
-        ? fmtSize(f.size) + ' · ' + f.pages + (f.pages === 1 ? ' page' : ' pages') + ' · ' + f.chars.toLocaleString() + ' chars'
+        ? fmtSize(f.size) + ' · ' + t('s1PagesLabel', { n: f.pages }) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() })
         : f.kind === 'bank'
-          ? fmtSize(f.size) + ' · question bank — saved to My exams'
-          : fmtSize(f.size) + ' · ' + f.chars.toLocaleString() + ' chars';
+          ? fmtSize(f.size) + ' · ' + t('s1BankSaved')
+          : fmtSize(f.size) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() });
       meta.appendChild(el('span', 'file-sub muted', sub));
       row.appendChild(meta);
       var rm = el('button', 'file-remove', '✕');
       rm.type = 'button';
-      rm.title = 'Remove this file';
-      rm.setAttribute('aria-label', 'Remove ' + f.name);
+      rm.title = t('s1RemoveFile');
+      rm.setAttribute('aria-label', t('s1RemoveAria', { name: f.name }));
       rm.addEventListener('click', function () {
         removeMaterialFile(idx);
         refreshFileList();
@@ -478,17 +482,15 @@
     if (summary) {
       var chars = materialChars();
       var parts = [];
-      if (material.files.length) parts.push(material.files.length + (material.files.length === 1 ? ' file' : ' files'));
-      if (material.pdfPages) parts.push(material.pdfPages + (material.pdfPages === 1 ? ' PDF page' : ' PDF pages'));
-      parts.push(chars.toLocaleString() + ' characters total');
+      if (material.files.length) parts.push(t('s1FilesLabel', { n: material.files.length }));
+      if (material.pdfPages) parts.push(t('s1PagesLabel', { n: material.pdfPages }));
+      parts.push(t('s1CharsTotal', { n: chars.toLocaleString() }));
       summary.textContent = chars > 0
-        ? 'Material ready: ' + parts.join(' · ') + '.'
-        : 'No material yet — add a file or paste some text to continue.';
+        ? t('s1Ready', { parts: parts.join(' · ') })
+        : t('s1NoMaterial');
     }
     if (pdfNote) {
-      pdfNote.textContent = material.pdfFailed
-        ? 'PDF reading needs an internet connection the first time (pdf.js loads from a CDN). It could not be loaded — paste the text instead, or check your connection and try again. Everything else still works offline.'
-        : '';
+      pdfNote.textContent = material.pdfFailed ? t('s1PdfFail') : '';
     }
     var nextBtn = document.querySelector('.wizard-nav .btn-primary');
     if (nextBtn) nextBtn.disabled = materialChars() === 0;
@@ -641,14 +643,11 @@
 
   function renderStepKey(wrap) {
     var card = el('section', 'card');
-    card.appendChild(el('p', 'kicker', 'Step 2 of 4 · Your AI key'));
-    card.appendChild(el('h2', null, 'Bring your own AI key'));
-    card.appendChild(el('p', 'hero-text',
-      'QuizForge has no server and no account — you use your own API key and ' +
-      'spend your own credits. Pick a provider, paste your key, and test it.'));
+    card.appendChild(el('p', 'kicker', t('kicker2')));
+    card.appendChild(el('h2', null, t('s2Title')));
+    card.appendChild(el('p', 'hero-text', t('s2Hero')));
     var privacy = el('p', 'privacy-note');
-    privacy.textContent = '🔒 Your key never leaves your browser except to the provider you choose. ' +
-      'It is stored only on this device (localStorage). It is never logged or shown in full.';
+    privacy.textContent = t('s2Privacy');
     card.appendChild(privacy);
 
     var provRow = el('div', 'prov-row');
@@ -672,7 +671,7 @@
     keyInput.className = 'input';
     keyInput.autocomplete = 'off';
     keyInput.spellcheck = false;
-    keyInput.placeholder = 'Paste your ' + p.label + ' key here';
+    keyInput.placeholder = t('s2KeyPh', { label: p.label });
     keyInput.value = byok.apiKey;
     keyInput.addEventListener('input', function () {
       byok.apiKey = keyInput.value.trim();
@@ -688,13 +687,13 @@
       hint = hint ? hint.querySelector('.field-hint') : null;
       if (hint) {
         hint.textContent = byok.apiKey
-          ? 'Saved on this device as ' + maskedKey() + ' — only the last 4 characters are ever shown.'
-          : (p.keyUrl ? 'Get one: ' + p.keyUrl : 'Get a key from your provider’s dashboard.');
+          ? t('s2KeySaved', { masked: maskedKey() })
+          : (p.keyUrl ? t('s2GetKey', { url: p.keyUrl }) : t('s2GetKeyDash'));
       }
     });
-    card.appendChild(fieldRow(p.keyLabel, keyInput,
-      byok.apiKey ? 'Saved on this device as ' + maskedKey() + ' — only the last 4 characters are ever shown.'
-        : (p.keyUrl ? 'Get one: ' + p.keyUrl : 'Get a key from your provider’s dashboard.')));
+    card.appendChild(fieldRow(t('keyLabel.' + byok.provider), keyInput,
+      byok.apiKey ? t('s2KeySaved', { masked: maskedKey() })
+        : (p.keyUrl ? t('s2GetKey', { url: p.keyUrl }) : t('s2GetKeyDash'))));
 
     var modelInput = document.createElement('input');
     modelInput.type = 'text';
@@ -704,8 +703,8 @@
     modelInput.placeholder = p.defaultModel;
     modelInput.value = byok.model;
     modelInput.addEventListener('input', function () { byok.model = modelInput.value.trim(); saveByok(); });
-    card.appendChild(fieldRow('Model (editable)', modelInput,
-      'Default: ' + p.defaultModel + '. Model IDs change often — if your provider retires one, type the new ID here.'));
+    card.appendChild(fieldRow(t('s2ModelLabel'), modelInput,
+      t('s2ModelHint', { model: p.defaultModel })));
 
     if (byok.provider === 'custom') {
       var baseInput = document.createElement('input');
@@ -716,8 +715,8 @@
       baseInput.placeholder = p.defaultBaseUrl;
       baseInput.value = byok.baseUrl;
       baseInput.addEventListener('input', function () { byok.baseUrl = baseInput.value.trim(); saveByok(); });
-      card.appendChild(fieldRow('Base URL', baseInput,
-        'OpenAI-compatible endpoint, without a trailing slash. Default: ' + p.defaultBaseUrl + '.'));
+      card.appendChild(fieldRow(t('s2BaseLabel'), baseInput,
+        t('s2BaseHint', { url: p.defaultBaseUrl })));
     }
 
     if (byok.provider === 'claude') {
@@ -729,18 +728,15 @@
       proxyInput.placeholder = 'https://your-cors-proxy.example.com';
       proxyInput.value = byok.proxyUrl;
       proxyInput.addEventListener('input', function () { byok.proxyUrl = proxyInput.value.trim(); saveByok(); });
-      card.appendChild(fieldRow('CORS proxy URL (required for Claude)', proxyInput,
-        'Claude’s API blocks direct calls from a browser page, so a CORS proxy is needed to reach it. ' +
-        'The proxy must forward the request to https://api.anthropic.com and pass the x-api-key header through. ' +
-        'Without a proxy, generation with Claude cannot run from this page.'));
+      card.appendChild(fieldRow(t('s2ProxyLabel'), proxyInput, t('s2ProxyHint')));
     }
 
     var testRow = el('div', 'btnrow');
-    var testBtn = el('button', 'btn btn-secondary', 'Test connection');
+    var testBtn = el('button', 'btn btn-secondary', t('s2Test'));
     testBtn.id = 'test-conn-btn';
     testBtn.addEventListener('click', function () { testConnection(); });
     testRow.appendChild(testBtn);
-    var clearBtn = el('button', 'btn btn-secondary btn-small', 'Forget my key');
+    var clearBtn = el('button', 'btn btn-secondary btn-small', t('s2Forget'));
     clearBtn.addEventListener('click', function () {
       byok.apiKey = '';
       saveByok();
@@ -755,13 +751,13 @@
 
     wrap.appendChild(card);
     wizardNav(wrap, {
-      back: 1, next: 3, nextLabel: 'Continue to exam settings →',
+      back: 1, next: 3, nextLabel: t('toSettings'),
       nextDisabled: !byok.apiKey
     });
     if (!byok.apiKey) {
       var nav = wrap.querySelector('.wizard-nav');
       if (nav) {
-        var warn = el('p', 'field-hint', 'Add your API key above to continue — or go back and use the demo bank in My exams, which needs no key.');
+        var warn = el('p', 'field-hint', t('s2Warn'));
         nav.appendChild(warn);
       }
     }
@@ -771,16 +767,16 @@
     var out = document.getElementById('test-out');
     var btn = document.getElementById('test-conn-btn');
     if (!byok.apiKey) {
-      if (out) { out.className = 'test-out err'; out.textContent = 'Paste your API key first.'; }
+      if (out) { out.className = 'test-out err'; out.textContent = t('s2TestNeedKey'); }
       return;
     }
-    if (out) { out.className = 'test-out'; out.textContent = 'Testing…'; }
+    if (out) { out.className = 'test-out'; out.textContent = t('s2Testing'); }
     if (btn) btn.disabled = true;
     callProvider('Reply with exactly this JSON and nothing else: {"ok": true}', 1, 'test')
       .then(function (text) {
         if (out) {
           out.className = 'test-out ok';
-          out.textContent = '✓ Connected — ' + PROVIDERS[byok.provider].label + ' (' + effectiveModel() + ') answered.';
+          out.textContent = t('s2Connected', { label: PROVIDERS[byok.provider].label, model: effectiveModel() });
         }
       })
       .catch(function (e) {

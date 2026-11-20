@@ -4,6 +4,19 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-20 — Arabic UI, part 1
+
+- **Language toggle (🌐 عربي / English)** in the header, saved on the
+  device. Arabic switches the whole interface to RTL (`dir="rtl"`,
+  logical CSS properties, code blocks kept LTR).
+- **New `i18n.js`** — one 173-key dictionary (English + Arabic) with a
+  `t()` helper, token replacement (`{name}`) and English fallback, so a
+  missing translation never breaks the UI. The dictionary already
+  covers steps 3–4, the library, the quiz and the results; part 1
+  converts the header, the settings panel and wizard steps 1–2.
+- Static chrome (brand, nav, footer, settings panel) translates via
+  `data-i18n` attributes; the dark-mode label translates too.
+
 ## 2026-11-20 — Fix: Gemini default model
 
 - **Gemini default is now `gemini-3.5-flash-lite`** — Google retires
