@@ -31,6 +31,12 @@ It works on phones too — same flow, stacked layout:
 
 ![Mobile upload step](docs/screenshots/mobile-upload.png)
 
+The interface is fully bilingual — switch to Arabic from the header and the whole app flips to RTL:
+
+| Start (Arabic) | Quiz (Arabic) | Results (Arabic) |
+|---|---|---|
+| ![Start in Arabic](docs/screenshots/ar-start.png) | ![Quiz in Arabic](docs/screenshots/ar-quiz.png) | ![Results in Arabic](docs/screenshots/ar-results.png) |
+
 ## How it works
 
 1. **Upload material** — drag-and-drop or pick files: PDF, text
