@@ -4,6 +4,37 @@ All notable changes to Practice Quiz Builder, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-20 — GUI redesign: polished app interface + styled repo
+
+- **New interface, same beige identity** — the app now looks like a real
+  product in Bassem's style: beige #F3EFE6 background, white cards with
+  dark borders and hard offset shadows, blue #1668E8 accent. Styling moved
+  to a separate `style.css`; still zero dependencies.
+- **App header** — logo mark, quiz title, a Settings button and the
+  dark-mode toggle, always visible.
+- **Start screen as a dashboard** — stat chips (questions, topics, best
+  score), topic cards you tap to start that topic right away, a big Start
+  button, and a "How it works" strip.
+- **Settings live in the header** — shuffle and the per-question countdown
+  moved into a dropdown panel (openable from the header or the start
+  screen), with a live summary line on the start screen.
+- **Quiz screen** — one top bar with the counter, progress bar and timers;
+  code blocks in a beige panel; answer options as large tappable cards
+  with hover, selected, correct and wrong states.
+- **Results screen** — score ring with percentage, time taken, best-score
+  line, and a per-question review with ✓/✗/⏰ status chips.
+- **Dark mode redesigned** — a dark version of the same beige/blue
+  identity, readable contrast, choice still remembered.
+- **Micro-interactions** — cards and buttons lift on hover and press in on
+  click; visible keyboard focus outlines; respects reduced-motion settings.
+- **Responsive** — verified clean at 1280px desktop and 390px phone
+  widths, no horizontal overflow.
+- **Repo styling** — badges, screenshots, and a project-structure section
+  in the README; real screenshots under `docs/screenshots/`.
+- Verified with a 33-check headless-Chrome smoke test (start, quiz,
+  results, retry-wrong, dark mode, custom banks, per-question timeout,
+  mobile) — 33/33 passed.
+
 ## 2026-11-20 — Day 1: timer, shuffle, review, topics, dark mode, custom banks
 
 - **Timer** — total elapsed timer on every attempt, plus an optional

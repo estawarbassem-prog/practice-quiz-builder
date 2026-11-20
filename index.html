@@ -4,119 +4,52 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Practice Quiz Builder</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; background: #f4f1ea; color: #222; line-height: 1.7; padding: 12px; }
-  .wrap { max-width: 760px; margin: 0 auto; }
-  header.hero { background: linear-gradient(135deg, #0d47a1, #1976d2); color: #fff; border-radius: 16px; padding: 22px 18px; text-align: center; margin-bottom: 12px; position: relative; }
-  header.hero h1 { font-size: 1.35rem; margin-bottom: 6px; }
-  header.hero p { font-size: .92rem; opacity: .93; }
-  .dark-toggle { position: absolute; top: 10px; right: 10px; font-family: inherit; font-size: .85rem; font-weight: 700; color: #fff; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.5); border-radius: 999px; padding: 5px 12px; cursor: pointer; }
-  .dark-toggle:hover { background: rgba(255,255,255,.3); }
-  .topbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; background: #fff; border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.1); font-size: .9rem; font-weight: 700; }
-  .topbar .timers { display: flex; gap: 14px; font-variant-numeric: tabular-nums; }
-  .topbar .timers .perq { color: #1976d2; }
-  .topbar .timers .perq.low { color: #c62828; }
-  .progress { background: #fff; border-radius: 12px; padding: 10px 14px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.1); font-size: .9rem; font-weight: 700; }
-  .progress .bar { height: 8px; background: #e3e3e3; border-radius: 99px; margin-top: 6px; overflow: hidden; }
-  .progress .bar > div { height: 100%; background: #1976d2; width: 0%; transition: width .3s; }
-  section.card { background: #fff; border-radius: 14px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,.07); border-left: 6px solid #1976d2; }
-  .qnum { display: inline-block; font-size: .75rem; font-weight: 800; color: #fff; background: #1976d2; border-radius: 999px; padding: 3px 12px; margin-bottom: 8px; }
-  .topic-tag { display: inline-block; font-size: .75rem; font-weight: 800; color: #1976d2; background: #e3f2fd; border-radius: 999px; padding: 3px 12px; margin-bottom: 8px; margin-left: 6px; }
-  h2 { font-size: 1.05rem; margin-bottom: 8px; }
-  pre { font-family: Consolas, monospace; background: #eef2ff; color: #0d47a1; padding: 10px 12px; border-radius: 10px; font-size: .88rem; overflow-x: auto; margin: 8px 0 12px; line-height: 1.5; }
-  .opts { display: grid; gap: 8px; }
-  .opts button { text-align: left; font-family: inherit; font-size: .93rem; line-height: 1.5; padding: 10px 12px; border-radius: 10px; border: 2px solid #ddd; background: #fafafa; cursor: pointer; }
-  .opts button:hover:not(:disabled) { border-color: #1976d2; background: #eef2ff; }
-  .opts button:disabled { cursor: default; }
-  .opts button .letter { font-weight: 800; color: #555; margin-right: 6px; }
-  .opts button.correct { border-color: #2e7d32; background: #e8f5e9; }
-  .opts button.correct .letter { color: #2e7d32; }
-  .opts button.wrong { border-color: #c62828; background: #ffebee; }
-  .opts button.wrong .letter { color: #c62828; }
-  .explain { display: none; background: #fff8e1; border: 1px solid #ffe082; border-radius: 10px; padding: 10px 12px; margin-top: 12px; font-size: .9rem; }
-  .explain.show { display: block; }
-  .explain b { color: #e65100; }
-  .verdict { font-weight: 800; margin-bottom: 4px; }
-  .verdict.ok { color: #2e7d32; }
-  .verdict.no { color: #c62828; }
-  .verdict.timeout { color: #c62828; }
-  .score { text-align: center; padding: 8px 0 2px; }
-  .score h2 { font-size: 1.4rem; }
-  .score .big { font-size: 2.4rem; font-weight: 800; color: #0d47a1; }
-  .score p { font-size: .95rem; margin: 6px 0 12px; }
-  .btn { display: inline-block; font-family: inherit; font-size: .95rem; font-weight: 700; color: #fff; background: #1976d2; border: none; border-radius: 999px; padding: 10px 22px; cursor: pointer; }
-  .btn:hover { background: #0d47a1; }
-  .btn.secondary { background: #fff; color: #1976d2; border: 2px solid #1976d2; margin-left: 8px; }
-  .btn.big { font-size: 1.05rem; padding: 12px 30px; }
-  .btnrow { margin-top: 14px; text-align: center; }
-  .btnrow .btn { margin: 4px; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 10px 0 4px; }
-  .chip { font-family: inherit; font-size: .88rem; font-weight: 700; padding: 7px 16px; border-radius: 999px; border: 2px solid #1976d2; background: #fff; color: #1976d2; cursor: pointer; }
-  .chip.active { background: #1976d2; color: #fff; }
-  .settings { text-align: left; font-size: .92rem; }
-  .settings label { display: block; margin: 8px 0; cursor: pointer; }
-  .settings input[type="checkbox"] { margin-right: 8px; transform: scale(1.2); }
-  .settings input[type="number"] { font-family: inherit; font-size: .92rem; width: 70px; padding: 4px 8px; border: 2px solid #ddd; border-radius: 8px; margin-left: 6px; }
-  .best { text-align: center; font-size: .92rem; font-weight: 700; color: #2e7d32; margin: 8px 0 2px; }
-  .hint { text-align: center; font-size: .82rem; color: #888; margin-top: 10px; }
-  .error { background: #fff3e0; border: 2px solid #ff9800; border-radius: 12px; padding: 14px 16px; font-size: .92rem; }
-  .error code { font-family: Consolas, monospace; background: #eef2ff; color: #0d47a1; padding: 1px 7px; border-radius: 6px; font-size: .88em; font-weight: 700; }
-  .bank-error { display: none; background: #ffebee; border: 2px solid #c62828; border-radius: 12px; padding: 10px 14px; font-size: .9rem; margin-top: 10px; text-align: left; }
-  .bank-error.show { display: block; }
-  .bank-note { font-size: .88rem; color: #555; margin-top: 10px; }
-  .review-item { text-align: left; border-top: 1px solid #eee; padding: 12px 0; }
-  .review-item:first-of-type { border-top: none; }
-  .review-item .rq { font-weight: 700; font-size: .95rem; margin-bottom: 4px; }
-  .review-item .ra { font-size: .9rem; margin: 2px 0; }
-  .review-item .ra .yours { color: #c62828; font-weight: 700; }
-  .review-item .ra .yours.ok { color: #2e7d32; }
-  .review-item .ra .right { color: #2e7d32; font-weight: 700; }
-  .review-item .rex { font-size: .88rem; color: #555; background: #fff8e1; border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
-  .file-label { display: inline-block; font-family: inherit; font-size: .9rem; font-weight: 700; color: #1976d2; background: #fff; border: 2px solid #1976d2; border-radius: 999px; padding: 8px 18px; cursor: pointer; margin: 4px; }
-  .file-label:hover { background: #eef2ff; }
-  input[type="file"] { display: none; }
-  footer { text-align: center; font-size: .8rem; color: #888; margin: 16px 0 8px; }
-
-  /* Dark mode */
-  body.dark { background: #121212; color: #e0e0e0; }
-  body.dark header.hero { background: linear-gradient(135deg, #0d2b52, #1565c0); }
-  body.dark .topbar, body.dark .progress, body.dark section.card { background: #1e1e1e; box-shadow: 0 2px 8px rgba(0,0,0,.4); color: #e0e0e0; }
-  body.dark .progress .bar { background: #333; }
-  body.dark pre { background: #0d1b2e; color: #90caf9; }
-  body.dark .opts button { background: #262626; border-color: #444; color: #e0e0e0; }
-  body.dark .opts button:hover:not(:disabled) { border-color: #64b5f6; background: #1a2a3a; }
-  body.dark .opts button .letter { color: #aaa; }
-  body.dark .opts button.correct { border-color: #66bb6a; background: #1b3a1e; }
-  body.dark .opts button.correct .letter { color: #66bb6a; }
-  body.dark .opts button.wrong { border-color: #ef5350; background: #3a1b1b; }
-  body.dark .opts button.wrong .letter { color: #ef5350; }
-  body.dark .explain { background: #2e2503; border-color: #8d6e00; color: #e0e0e0; }
-  body.dark .explain b { color: #ffb74d; }
-  body.dark .chip { background: #1e1e1e; }
-  body.dark .chip.active { background: #1976d2; }
-  body.dark .btn.secondary { background: #1e1e1e; }
-  body.dark .topic-tag { background: #0d2b52; color: #90caf9; }
-  body.dark .review-item { border-top-color: #333; }
-  body.dark .review-item .rex { background: #2e2503; color: #ccc; }
-  body.dark .bank-note { color: #aaa; }
-  body.dark .hint { color: #999; }
-  body.dark .score .big { color: #64b5f6; }
-  body.dark .best { color: #66bb6a; }
-  body.dark .settings input[type="number"] { background: #262626; color: #e0e0e0; border-color: #444; }
-  body.dark .file-label { background: #1e1e1e; }
-  body.dark .file-label:hover { background: #263238; }
-  body.dark footer { color: #777; }
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div class="wrap">
 
-<header class="hero">
-  <button class="dark-toggle" id="dark-toggle" type="button" title="Toggle dark mode">🌙 Dark</button>
-  <h1 id="quiz-title">📝 Practice Quiz Builder</h1>
-  <p id="quiz-subtitle">Loading questions…</p>
-</header>
+<div class="appbar-wrap">
+  <header class="appbar">
+    <div class="brand">
+      <span class="logo-mark" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="40" height="40"><rect x="2.5" y="2.5" width="43" height="43" rx="10" fill="#1668E8" stroke="#1E1B16" stroke-width="2.5"/><text x="24" y="33" text-anchor="middle" font-size="27" font-weight="800" fill="#fff" font-family="Arial, sans-serif">?</text></svg>
+      </span>
+      <div class="brand-text">
+        <h1 id="quiz-title">Practice Quiz Builder</h1>
+        <p id="quiz-subtitle">Loading questions…</p>
+      </div>
+    </div>
+    <div class="appbar-actions">
+      <button class="icon-btn" id="settings-btn" type="button" title="Settings" aria-haspopup="true" aria-expanded="false" aria-controls="settings-panel">
+        <svg class="ic" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M19 7h1M4 17h3M13 17h7"/><circle cx="16" cy="7" r="2.4"/><circle cx="10" cy="17" r="2.4"/></svg>
+        <span>Settings</span>
+      </button>
+      <button class="icon-btn" id="dark-toggle" type="button" title="Toggle dark mode">
+        <span class="ic-moon"><svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13.5A8 8 0 1 1 10.5 4a6.5 6.5 0 0 0 9.5 9.5z"/></svg></span>
+        <span class="ic-sun"><svg class="ic" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5 5l1.8 1.8M17.2 17.2L19 19M19 5l-1.8 1.8M6.8 17.2L5 19"/></svg></span>
+        <span id="dark-label">Dark</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="settings-panel" id="settings-panel" hidden>
+    <h2>Settings</h2>
+    <label class="set-row">
+      <input type="checkbox" id="set-shuffle">
+      <span>Shuffle questions and answer options</span>
+    </label>
+    <label class="set-row">
+      <input type="checkbox" id="set-perq">
+      <span>Per-question countdown</span>
+    </label>
+    <label class="set-row">
+      <span>Seconds per question:</span>
+      <input type="number" id="set-seconds" min="5" max="600" value="60">
+    </label>
+    <p class="set-note">Settings are saved on this device and apply to the next question you start.</p>
+  </div>
+</div>
 
 <div id="app"></div>
 
@@ -162,6 +95,27 @@
     var m = Math.floor(totalSeconds / 60);
     var s = totalSeconds % 60;
     return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  /* Small inline SVG icons (no external assets). */
+  function icon(name, size) {
+    var s = size || 15;
+    var inner = {
+      clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+      hourglass: '<path d="M7 4h10"/><path d="M7 20h10"/><path d="M8.5 4c0 4.5 7 4.5 7 8s-7 3.5-7 8"/>',
+      pointer: '<path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/>',
+      list: '<circle cx="5" cy="12" r="2.6"/><circle cx="12" cy="12" r="2.6"/><circle cx="19" cy="12" r="2.6"/><path d="M7.6 12h1.8M14.6 12h1.8"/>',
+      grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>'
+    }[name] || '';
+    return '<svg class="ic" viewBox="0 0 24 24" width="' + s + '" height="' + s +
+      '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+  }
+
+  function topicIcon(t) {
+    if (t === 'All') return icon('grid', 24);
+    if (t === 'Pointers') return icon('pointer', 24);
+    return icon('list', 24);
   }
 
   function validate(data) {
@@ -236,8 +190,82 @@
     var dark = false;
     try { dark = localStorage.getItem(LS_DARK) === '1'; } catch (e) {}
     document.body.classList.toggle('dark', dark);
-    var btn = document.getElementById('dark-toggle');
-    btn.textContent = dark ? '☀️ Light' : '🌙 Dark';
+    var lbl = document.getElementById('dark-label');
+    if (lbl) lbl.textContent = dark ? 'Light' : 'Dark';
+  }
+
+  /* ---------- settings panel ---------- */
+
+  function openSettingsPanel() {
+    var p = document.getElementById('settings-panel');
+    p.hidden = false;
+    document.getElementById('settings-btn').setAttribute('aria-expanded', 'true');
+  }
+
+  function closeSettingsPanel() {
+    var p = document.getElementById('settings-panel');
+    p.hidden = true;
+    document.getElementById('settings-btn').setAttribute('aria-expanded', 'false');
+  }
+
+  function updateSettingsSummary() {
+    var sum = document.getElementById('settings-summary');
+    if (!sum) return;
+    sum.innerHTML = '';
+    sum.appendChild(document.createTextNode('Shuffle: '));
+    sum.appendChild(el('b', null, settings.shuffle ? 'On' : 'Off'));
+    sum.appendChild(document.createTextNode('  ·  Per-question timer: '));
+    sum.appendChild(el('b', null, settings.perQTimer
+      ? 'On (' + settings.perQSeconds + 's)' : 'Off'));
+  }
+
+  function wireSettingsPanel() {
+    var btn = document.getElementById('settings-btn');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var p = document.getElementById('settings-panel');
+      if (p.hidden) openSettingsPanel(); else closeSettingsPanel();
+    });
+    document.addEventListener('click', function (e) {
+      var p = document.getElementById('settings-panel');
+      if (!p.hidden && !e.target.closest('.appbar-wrap')) closeSettingsPanel();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeSettingsPanel();
+    });
+
+    var sh = document.getElementById('set-shuffle');
+    sh.checked = settings.shuffle;
+    sh.addEventListener('change', function () {
+      settings.shuffle = sh.checked;
+      saveSettings();
+      updateSettingsSummary();
+    });
+
+    var pq = document.getElementById('set-perq');
+    pq.checked = settings.perQTimer;
+    var sec = document.getElementById('set-seconds');
+    sec.value = String(settings.perQSeconds);
+    sec.disabled = !settings.perQTimer;
+    pq.addEventListener('change', function () {
+      settings.perQTimer = pq.checked;
+      sec.disabled = !pq.checked;
+      if (!pq.checked && perQTimerId !== null) {
+        clearInterval(perQTimerId);
+        perQTimerId = null;
+      }
+      saveSettings();
+      updateSettingsSummary();
+    });
+    sec.addEventListener('change', function () {
+      var v = parseInt(sec.value, 10);
+      if (!isNaN(v)) {
+        settings.perQSeconds = Math.max(5, Math.min(600, v));
+        sec.value = String(settings.perQSeconds);
+        saveSettings();
+        updateSettingsSummary();
+      }
+    });
   }
 
   /* ---------- timers ---------- */
@@ -251,7 +279,7 @@
     if (totalTimerId !== null) clearInterval(totalTimerId);
     totalTimerId = setInterval(function () {
       var t = document.getElementById('timer-total');
-      if (t && run) t.textContent = '⏱ ' + fmtTime(Math.floor((Date.now() - run.startedAt) / 1000));
+      if (t && run) t.textContent = fmtTime(Math.floor((Date.now() - run.startedAt) / 1000));
     }, 1000);
   }
 
@@ -259,13 +287,18 @@
     if (perQTimerId !== null) clearInterval(perQTimerId);
     run.perQLeft = settings.perQSeconds;
     var chip = document.getElementById('timer-perq');
-    if (chip) { chip.textContent = '⏳ ' + fmtTime(run.perQLeft); chip.classList.remove('low'); }
+    if (chip) {
+      chip.textContent = fmtTime(run.perQLeft);
+      var w = chip.closest('.tchip');
+      if (w) w.classList.remove('low');
+    }
     perQTimerId = setInterval(function () {
       run.perQLeft--;
       var c = document.getElementById('timer-perq');
       if (c) {
-        c.textContent = '⏳ ' + fmtTime(Math.max(run.perQLeft, 0));
-        if (run.perQLeft <= 10) c.classList.add('low');
+        c.textContent = fmtTime(Math.max(run.perQLeft, 0));
+        var wrap = c.closest('.tchip');
+        if (wrap && run.perQLeft <= 10) wrap.classList.add('low');
       }
       if (run.perQLeft <= 0) {
         clearInterval(perQTimerId);
@@ -275,7 +308,7 @@
     }, 1000);
   }
 
-  /* ---------- start screen ---------- */
+  /* ---------- start screen (dashboard) ---------- */
 
   function buildTopics() {
     var seen = {};
@@ -286,95 +319,86 @@
     });
   }
 
+  function statChip(text, cls) {
+    return el('span', 'stat' + (cls ? ' ' + cls : ''), text);
+  }
+
+  function howStep(num, title, text) {
+    var step = el('div', 'how-step');
+    step.appendChild(el('span', 'step-num', num));
+    step.appendChild(el('h3', null, title));
+    step.appendChild(el('p', null, text));
+    return step;
+  }
+
   function showStart(note) {
     stopTimers();
     run = null;
     app.innerHTML = '';
     buildTopics();
 
-    var card = el('section', 'card score');
-    card.appendChild(el('h2', null, 'Ready?'));
-
+    // Hero card with stats
+    var hero = el('section', 'card hero');
+    hero.appendChild(el('p', 'kicker', 'CS.212 · Data Structures'));
+    hero.appendChild(el('h2', null, 'Ready to practice?'));
+    hero.appendChild(el('p', 'hero-text',
+      'Ten verified multiple-choice questions on C pointers and linked lists — ' +
+      'every answer comes with a clear explanation.'));
+    var stats = el('div', 'stats');
+    stats.appendChild(statChip(quiz.questions.length + ' questions'));
+    stats.appendChild(statChip(topics.length + (topics.length === 1 ? ' topic' : ' topics')));
     var best = loadBest();
     if (best && best.bank === (quiz.title || 'Practice Quiz')) {
-      card.appendChild(el('div', 'best',
-        '🏆 Best score on this quiz: ' + best.score + '/' + best.total +
-        ' (' + best.pct + '%) · ' + best.date));
+      stats.appendChild(statChip('🏆 Best: ' + best.score + '/' + best.total +
+        ' (' + best.pct + '%)', 'stat-best'));
+    } else {
+      stats.appendChild(statChip('No attempts yet'));
     }
+    hero.appendChild(stats);
+    if (note) hero.appendChild(el('p', 'bank-note', note));
+    app.appendChild(hero);
 
-    if (note) card.appendChild(el('p', 'bank-note', note));
-
-    card.appendChild(el('p', null, 'Pick a topic, then start. Your score and best result are saved on this device.'));
-
-    // Topic filter chips
-    var chips = el('div', 'chips');
+    // Topic cards — click one to start that topic right away
+    var topicsWrap = el('div', 'topics');
     var all = ['All'].concat(topics);
     all.forEach(function (t) {
-      var chip = el('button', 'chip' + (selectedTopic === t ? ' active' : ''), t);
-      chip.type = 'button';
-      chip.addEventListener('click', function () {
-        selectedTopic = t;
-        showStart();
-      });
-      chips.appendChild(chip);
-    });
-    card.appendChild(chips);
-    var counts = all.map(function (t) {
       var n = t === 'All' ? quiz.questions.length
         : quiz.questions.filter(function (q) { return (q.topic || 'General') === t; }).length;
-      return n;
+      var card = el('button', 'topic-card' + (selectedTopic === t ? ' selected' : ''));
+      card.type = 'button';
+      var ic = el('span', 'topic-icon');
+      ic.innerHTML = topicIcon(t);
+      card.appendChild(ic);
+      card.appendChild(el('span', 'topic-name', t === 'All' ? 'All topics' : t));
+      card.appendChild(el('span', 'topic-count', n + (n === 1 ? ' question' : ' questions')));
+      card.appendChild(el('span', 'topic-go', 'Start →'));
+      card.addEventListener('click', function () {
+        selectedTopic = t;
+        startQuiz();
+      });
+      topicsWrap.appendChild(card);
     });
-    card.appendChild(el('p', 'bank-note',
-      'Questions in this bank: ' + quiz.questions.length +
-      (topics.length > 1 ? ' — ' + topics.map(function (t, i) {
-        return t + ': ' + counts[i + 1];
-      }).join(' · ') : '')));
+    app.appendChild(topicsWrap);
 
-    // Settings
-    var st = el('div', 'settings');
-    var l1 = el('label');
-    var c1 = document.createElement('input');
-    c1.type = 'checkbox'; c1.checked = settings.shuffle;
-    c1.addEventListener('change', function () { settings.shuffle = c1.checked; saveSettings(); });
-    l1.appendChild(c1);
-    l1.appendChild(document.createTextNode('Shuffle questions and answer options'));
-    st.appendChild(l1);
-
-    var l2 = el('label');
-    var c2 = document.createElement('input');
-    c2.type = 'checkbox'; c2.checked = settings.perQTimer;
-    c2.addEventListener('change', function () {
-      settings.perQTimer = c2.checked;
-      secInput.disabled = !c2.checked;
-      saveSettings();
-    });
-    l2.appendChild(c2);
-    l2.appendChild(document.createTextNode('Per-question countdown (seconds):'));
-    var secInput = document.createElement('input');
-    secInput.type = 'number'; secInput.min = '5'; secInput.max = '600';
-    secInput.value = String(settings.perQSeconds);
-    secInput.disabled = !settings.perQTimer;
-    secInput.addEventListener('change', function () {
-      var v = parseInt(secInput.value, 10);
-      if (!isNaN(v)) {
-        settings.perQSeconds = Math.max(5, Math.min(600, v));
-        secInput.value = String(settings.perQSeconds);
-        saveSettings();
-      }
-    });
-    l2.appendChild(secInput);
-    st.appendChild(l2);
-    card.appendChild(st);
-
-    // Start button
+    // Start card: big start button, settings summary, custom bank
+    var startCard = el('section', 'card');
     var row = el('div', 'btnrow');
-    var start = el('button', 'btn big', '▶ Start quiz');
+    var start = el('button', 'btn btn-primary btn-big', 'Start quiz →');
     start.addEventListener('click', function () { startQuiz(); });
     row.appendChild(start);
-    card.appendChild(row);
+    startCard.appendChild(row);
 
-    // Custom bank loader
-    var bank = el('div', 'btnrow');
+    var sum = el('p', 'settings-summary');
+    sum.id = 'settings-summary';
+    startCard.appendChild(sum);
+    var changeBtn = el('button', 'btn btn-secondary btn-small', 'Change settings');
+    changeBtn.addEventListener('click', function () { openSettingsPanel(); });
+    var changeRow = el('div', 'btnrow');
+    changeRow.style.marginTop = '4px';
+    changeRow.appendChild(changeBtn);
+    startCard.appendChild(changeRow);
+
+    var bank = el('div', 'btnrow bank-row');
     var lbl = el('label', 'file-label', '📂 Load my own question bank (.json)');
     var fileInput = document.createElement('input');
     fileInput.type = 'file';
@@ -386,26 +410,41 @@
     lbl.appendChild(fileInput);
     bank.appendChild(lbl);
     if (sampleQuiz && quiz !== sampleQuiz) {
-      var restore = el('button', 'btn secondary', 'Restore sample bank');
+      var restore = el('button', 'btn btn-secondary', 'Restore sample bank');
       restore.addEventListener('click', function () {
         quiz = sampleQuiz;
         selectedTopic = 'All';
-        document.getElementById('quiz-title').textContent = '📝 ' + (quiz.title || 'Practice Quiz');
+        document.getElementById('quiz-title').textContent = quiz.title || 'Practice Quiz';
         document.getElementById('quiz-subtitle').textContent =
           quiz.subtitle || (quiz.questions.length + ' questions — test yourself');
         showStart('Sample bank restored.');
       });
       bank.appendChild(restore);
     }
-    card.appendChild(bank);
+    startCard.appendChild(bank);
 
     var bankErr = el('div', 'bank-error');
     bankErr.id = 'bank-error';
-    card.appendChild(bankErr);
+    startCard.appendChild(bankErr);
 
-    card.appendChild(el('div', 'hint',
+    startCard.appendChild(el('div', 'hint',
       'Shortcuts during the quiz: keys 1–4 pick an answer, Enter moves to the next question.'));
-    app.appendChild(card);
+    app.appendChild(startCard);
+
+    // How it works
+    var how = el('section', 'card how');
+    how.appendChild(el('h2', null, 'How it works'));
+    var steps = el('div', 'how-steps');
+    steps.appendChild(howStep('1', 'Pick a topic',
+      'Choose All topics, Pointers, or Linked List — or load your own question bank.'));
+    steps.appendChild(howStep('2', 'Answer & learn',
+      'Get instant feedback with a “Why” explanation after every answer.'));
+    steps.appendChild(howStep('3', 'Review & retry',
+      'See your full review at the end and re-try only the ones you missed.'));
+    how.appendChild(steps);
+    app.appendChild(how);
+
+    updateSettingsSummary();
   }
 
   function loadCustomBank(file) {
@@ -417,7 +456,7 @@
         validate(data);
         quiz = data;
         selectedTopic = 'All';
-        document.getElementById('quiz-title').textContent = '📝 ' + (quiz.title || 'Practice Quiz');
+        document.getElementById('quiz-title').textContent = quiz.title || 'Practice Quiz';
         document.getElementById('quiz-subtitle').textContent =
           quiz.subtitle || (quiz.questions.length + ' questions — test yourself');
         showStart('Custom bank loaded: "' + (quiz.title || 'Untitled') + '" — ' +
@@ -495,54 +534,67 @@
     var state = run.answers[pos];
     app.innerHTML = '';
 
-    // Top bar: counter + timers
-    var top = el('div', 'topbar');
-    top.appendChild(el('span', null, 'Question ' + (pos + 1) + ' of ' + run.qIndexes.length));
+    // Top bar: counter + timers + progress
+    var top = el('div', 'card quiz-top');
+    var row1 = el('div', 'top-row');
+    row1.appendChild(el('span', 'counter', 'Question ' + (pos + 1) + ' of ' + run.qIndexes.length));
     var timers = el('span', 'timers');
-    timers.appendChild(el('span', null, ''));
-    timers.lastChild.id = 'timer-total';
-    timers.lastChild.textContent = '⏱ 00:00';
+    var totalChip = el('span', 'tchip');
+    totalChip.innerHTML = icon('clock', 15);
+    var tt = el('span');
+    tt.id = 'timer-total';
+    tt.textContent = '00:00';
+    totalChip.appendChild(tt);
+    timers.appendChild(totalChip);
     if (settings.perQTimer) {
-      var perq = el('span', 'perq', '⏳ ' + fmtTime(run.perQLeft));
-      perq.id = 'timer-perq';
+      var perq = el('span', 'tchip perq');
+      perq.innerHTML = icon('hourglass', 15);
+      var pt = el('span');
+      pt.id = 'timer-perq';
+      pt.textContent = fmtTime(run.perQLeft);
+      perq.appendChild(pt);
       timers.appendChild(perq);
     }
-    top.appendChild(timers);
-    app.appendChild(top);
-
-    // Progress bar
-    var prog = el('div', 'progress');
-    prog.appendChild(el('span', null, ''));
-    prog.lastChild.id = 'progress-text';
+    row1.appendChild(timers);
+    top.appendChild(row1);
+    var progWrap = el('div', 'progress-wrap');
     var bar = el('div', 'bar');
     var fill = el('div');
     fill.id = 'progress-fill';
     bar.appendChild(fill);
-    prog.appendChild(bar);
-    app.appendChild(prog);
+    progWrap.appendChild(bar);
+    var ptext = el('span', 'progress-text');
+    ptext.id = 'progress-text';
+    progWrap.appendChild(ptext);
+    top.appendChild(progWrap);
+    app.appendChild(top);
     renderProgress();
 
     // Question card
-    var card = el('section', 'card');
-    var tag = el('span', 'qnum', 'Question ' + (pos + 1) + ' of ' + run.qIndexes.length);
-    card.appendChild(tag);
-    if (q.topic) card.appendChild(el('span', 'topic-tag', q.topic));
-    card.appendChild(el('h2', null, q.question));
+    var card = el('section', 'card q-card');
+    var meta = el('div', 'q-meta');
+    meta.appendChild(el('span', 'qnum', 'Q' + (pos + 1)));
+    if (q.topic) meta.appendChild(el('span', 'topic-tag', q.topic));
+    card.appendChild(meta);
+    card.appendChild(el('h2', 'q-text', q.question));
     if (q.code) {
-      var pre = el('pre');
+      var pre = el('pre', 'q-code');
       pre.textContent = q.code;
       card.appendChild(pre);
     }
     var list = el('div', 'opts');
     run.optOrders[pos].forEach(function (opt, idx) {
-      var btn = el('button');
+      var btn = el('button', 'opt');
       btn.type = 'button';
-      btn.appendChild(el('span', 'letter', LETTERS[idx] + ')'));
-      btn.appendChild(document.createTextNode(opt.text));
+      btn.appendChild(el('span', 'letter', LETTERS[idx]));
+      var txt = el('span', 'opt-text');
+      txt.textContent = opt.text;
+      btn.appendChild(txt);
       if (state) {
         btn.disabled = true;
         if (opt.correct) btn.classList.add('correct');
         if (idx === state.picked && !state.correct) btn.classList.add('wrong');
+        if (!opt.correct && idx !== state.picked) btn.classList.add('dim');
       }
       btn.addEventListener('click', function () {
         btn.blur();
@@ -575,7 +627,7 @@
     if (state) {
       var row = el('div', 'btnrow');
       var last = pos === run.qIndexes.length - 1;
-      var next = el('button', 'btn big', last ? 'See my results ✓' : 'Next question →');
+      var next = el('button', 'btn btn-primary btn-big', last ? 'See my results ✓' : 'Next question →');
       next.id = 'next-btn';
       next.addEventListener('click', function () { next.blur(); nextQuestion(); });
       row.appendChild(next);
@@ -618,6 +670,19 @@
 
   /* ---------- results ---------- */
 
+  function ringSVG(score, total, pct) {
+    var C = 2 * Math.PI * 70;
+    var off = (C * (1 - pct / 100)).toFixed(1);
+    return '<svg class="ring" viewBox="0 0 160 160" width="150" height="150" role="img" aria-label="Score ' +
+      score + ' out of ' + total + '">' +
+      '<circle class="ring-track" cx="80" cy="80" r="70"/>' +
+      '<circle class="ring-fill" cx="80" cy="80" r="70" stroke-dasharray="' + C.toFixed(1) +
+      '" stroke-dashoffset="' + off + '" transform="rotate(-90 80 80)"/>' +
+      '<text class="ring-score" x="80" y="78" text-anchor="middle">' + score + '/' + total + '</text>' +
+      '<text class="ring-pct" x="80" y="100" text-anchor="middle">' + pct + '%</text>' +
+      '</svg>';
+  }
+
   function showResults() {
     stopTimers();
     var total = run.qIndexes.length;
@@ -626,21 +691,29 @@
     if (!run.isRetry) saveBest(score, total, pct);
 
     app.innerHTML = '';
-    var card = el('section', 'card score');
+    var card = el('section', 'card results-card');
+    card.appendChild(el('p', 'kicker', 'Results'));
     card.appendChild(el('h2', null, 'Your score'));
-    card.appendChild(el('div', 'big', score + ' / ' + total + '  ·  ' + pct + '%'));
+
+    var ringWrap = el('div', 'ring-wrap');
+    var ringBox = el('div', 'ring-box');
+    ringBox.innerHTML = ringSVG(score, total, pct);
+    ringWrap.appendChild(ringBox);
+    var side = el('div', 'ring-side');
+    side.appendChild(el('div', 'big-pct', pct + '%'));
     var secs = Math.floor((Date.now() - run.startedAt) / 1000);
-    card.appendChild(el('p', null, scoreMessage(pct) + '  Finished in ' + fmtTime(secs) + '.'));
+    side.appendChild(el('p', null, scoreMessage(pct)));
+    side.appendChild(el('p', 'muted', 'Finished in ' + fmtTime(secs) + ' · ' + total + ' questions.'));
     var best = loadBest();
     if (best && best.bank === (quiz.title || 'Practice Quiz')) {
-      card.appendChild(el('div', 'best',
+      side.appendChild(el('div', 'best',
         '🏆 Best score on this quiz: ' + best.score + '/' + best.total + ' (' + best.pct + '%)'));
     }
+    ringWrap.appendChild(side);
+    card.appendChild(ringWrap);
 
     // Per-question review
-    var reviewTitle = el('h2', null, 'Review');
-    reviewTitle.style.textAlign = 'left';
-    reviewTitle.style.marginTop = '14px';
+    var reviewTitle = el('h2', 'review-title', 'Review');
     card.appendChild(reviewTitle);
     run.qIndexes.forEach(function (qi, pos) {
       var q = quiz.questions[qi];
@@ -648,9 +721,12 @@
       var opts = run.optOrders[pos];
       var correctIdx = opts.findIndex(function (o) { return o.correct; });
       var item = el('div', 'review-item');
+      var status = el('span', 'status-chip ' + ((a && a.correct) ? 'ok' : 'no'),
+        a && a.correct ? '✓ Correct' : (a && a.timedOut ? '⏰ Time out' : '✗ Wrong'));
+      item.appendChild(status);
       item.appendChild(el('div', 'rq', (pos + 1) + '. ' + q.question));
       if (q.code) {
-        var pre = el('pre');
+        var pre = el('pre', 'q-code');
         pre.textContent = q.code;
         item.appendChild(pre);
       }
@@ -686,14 +762,14 @@
       return !a || !a.correct;
     });
     if (wrongIndexes.length > 0) {
-      var retryWrong = el('button', 'btn', '↻ Retry wrong answers only (' + wrongIndexes.length + ')');
+      var retryWrong = el('button', 'btn btn-primary', '↻ Retry wrong answers only (' + wrongIndexes.length + ')');
       retryWrong.addEventListener('click', function () { startQuiz(wrongIndexes); });
       row.appendChild(retryWrong);
     }
-    var again = el('button', 'btn secondary', 'Try again (all)');
+    var again = el('button', 'btn btn-secondary', 'Try again (all)');
     again.addEventListener('click', function () { startQuiz(); });
     row.appendChild(again);
-    var home = el('button', 'btn secondary', 'Back to start');
+    var home = el('button', 'btn btn-secondary', 'Back to topics');
     home.addEventListener('click', function () { showStart(); });
     row.appendChild(home);
     card.appendChild(row);
@@ -747,6 +823,7 @@
   /* ---------- boot ---------- */
 
   applyDark();
+  wireSettingsPanel();
   fetch('questions.json')
     .then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status + ' while fetching questions.json');
@@ -756,8 +833,7 @@
       validate(data);
       quiz = data;
       sampleQuiz = data;
-      document.getElementById('quiz-title').textContent =
-        '📝 ' + (quiz.title || 'Practice Quiz');
+      document.getElementById('quiz-title').textContent = quiz.title || 'Practice Quiz';
       document.getElementById('quiz-subtitle').textContent =
         quiz.subtitle || (quiz.questions.length + ' questions — test yourself');
       document.getElementById('foot').textContent =
