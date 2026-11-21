@@ -22,6 +22,7 @@
   var LS_STATS = 'qf-stats';     // [{id, ts, title, total, score, secs, items: [{topic, correct, secs}]}]
   var STATS_MAX = 50;            // keep only the newest 50 attempts
   var REV_NEEDED = 2;            // consecutive correct answers to master a question
+  var TTS_RATES = [0.8, 1, 1.25]; // Slow / Normal / Fast reading speeds
 
   /* Share via link: the exam rides in the URL hash (#exam=<payload>).
      MAX_SHARE_URL is the practical chat-message limit — longer links
@@ -37,7 +38,7 @@
   var XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
   var CHUNK_CHARS = 12000;
 
-  var settings = loadSettings();   // { shuffle, perQTimer, perQSeconds }
+  var settings = loadSettings();   // { shuffle, perQTimer, perQSeconds, autoRead, speechRate }
   var selectedTopic = 'All';
   var topics = [];
   var run = null;                  // current attempt, see startQuiz()
@@ -338,7 +339,7 @@
   /* ---------- persistence ---------- */
 
   function loadSettings() {
-    var d = { shuffle: true, perQTimer: false, perQSeconds: 60 };
+    var d = { shuffle: true, perQTimer: false, perQSeconds: 60, autoRead: false, speechRate: 1 };
     try {
       var raw = localStorage.getItem(LS_SETTINGS);
       if (raw) {
@@ -347,6 +348,9 @@
         if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
         if (typeof s.perQSeconds === 'number' && s.perQSeconds >= 5 && s.perQSeconds <= 600)
           d.perQSeconds = Math.round(s.perQSeconds);
+        if (typeof s.autoRead === 'boolean') d.autoRead = s.autoRead;
+        if (typeof s.speechRate === 'number' && TTS_RATES.indexOf(s.speechRate) !== -1)
+          d.speechRate = s.speechRate;
       }
     } catch (e) { /* corrupted settings: fall back to defaults */ }
     return d;
@@ -662,6 +666,7 @@
   function openFlashcards(bank) {
     if (!bank || !bank.questions || !bank.questions.length) return;
     stopTimers();
+    stopSpeech();
     run = null;
     quiz = bank;
     fc = {
@@ -692,6 +697,7 @@
 
   function fcGo(d) {
     if (!fc) return;
+    stopSpeech();
     var n = fc.pos + d;
     if (n < 0 || n >= fc.order.length) return;
     fc.pos = n;
@@ -701,6 +707,7 @@
 
   function fcToggleShuffle() {
     if (!fc) return;
+    stopSpeech();
     fc.shuffled = !fc.shuffled;
     fc.order = shuffle(fc.bank.questions.map(function (_, i) { return i; }));
     fc.pos = 0;
@@ -760,6 +767,17 @@
       var sc = el('pre', 'fc-code', q.starterCode);
       front.appendChild(sc);
     }
+    /* Read this card aloud. The spoken order for matching / ordering
+       is the scrambled one (never the paired / correct order), so
+       the answer is not given away. The button stops the click from
+       reaching the card, so listening never flips it. */
+    var fcSpeak = makeSpeakButton(q,
+      qt === 'matching' ? { rights: scrambleRights(q, false) } :
+      qt === 'ordering' ? { items: scrambleItems(q, false) } : null);
+    if (fcSpeak) {
+      fcSpeak.id = 'fc-speak-btn';
+      front.appendChild(fcSpeak);
+    }
     front.appendChild(el('p', 'fc-hint', t('fcFlipHint')));
     inner.appendChild(front);
 
@@ -791,6 +809,9 @@
     card.appendChild(inner);
     card.addEventListener('click', function () { fcFlip(); });
     card.addEventListener('keydown', function (e) {
+      /* Only flip when the card itself has focus — a focused button
+         inside it (e.g. the speaker button) handles its own keys. */
+      if (e.target !== card) return;
       if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); fcFlip(); }
     });
     scene.appendChild(card);
@@ -899,6 +920,7 @@
     currentView = v;
     if (run && run.strict) exitFullscreen();
     stopTimers();
+    stopSpeech();
     run = null;
     fc = null;
     document.getElementById('nav-create').classList.toggle('active', v === 'create');
@@ -916,6 +938,9 @@
      the per-question countdown is restored so the switch does not reset
      the timer. */
   window.__qfRerender = function () {
+    /* A language switch stops any reading in progress — the new
+       screen re-renders in the new language. */
+    stopSpeech();
     if (currentView === 'create') renderWizard();
     else if (currentView === 'summary') {
       if (sumState.data || (quiz && quiz.summary)) showSummaryScreen(sumReturn);
@@ -3954,6 +3979,33 @@
         updateSettingsSummary();
       }
     });
+
+    /* Text-to-speech: auto-read toggle + reading speed. When the
+       browser has no speechSynthesis, both controls hide and a
+       plain note says so — the app never pretends reading works. */
+    var arRow = document.getElementById('set-autoread-row');
+    var rateRow = document.getElementById('set-rate-row');
+    var ttsNote = document.getElementById('set-tts-note');
+    if (!ttsSupported()) {
+      if (arRow) arRow.hidden = true;
+      if (rateRow) rateRow.hidden = true;
+      if (ttsNote) ttsNote.hidden = false;
+    } else {
+      var ar = document.getElementById('set-autoread');
+      ar.checked = settings.autoRead;
+      ar.addEventListener('change', function () {
+        settings.autoRead = ar.checked;
+        saveSettings();
+      });
+      var rate = document.getElementById('set-rate');
+      rate.value = String(settings.speechRate);
+      rate.addEventListener('change', function () {
+        var v = parseFloat(rate.value);
+        settings.speechRate = TTS_RATES.indexOf(v) !== -1 ? v : 1;
+        rate.value = String(settings.speechRate);
+        saveSettings();
+      });
+    }
   }
 
   /* ---------- timers ---------- */
@@ -4127,6 +4179,7 @@
   function showStart(note) {
     if (run && run.strict) exitFullscreen();
     stopTimers();
+    stopSpeech();
     run = null;
     fc = null;
     strictMode = false;   // strict is per exam, off by default
@@ -4259,10 +4312,201 @@
     updateSettingsSummary();
   }
 
+  /* ---------- text-to-speech: read questions aloud ----------
+     Web Speech API (window.speechSynthesis): on-device, no network,
+     no API key, nothing sent anywhere. Voice language follows the
+     exam's language (Arabic script -> ar-EG, otherwise en-US,
+     detected per question); a matching voice is picked when one
+     exists, otherwise the browser default speaks. One shared
+     stopSpeech() is called from every path that moves on, so speech
+     never keeps talking over the next screen. */
+  var ttsSpeaking = false;   // is a QuizForge utterance playing?
+  var ttsCurrentBtn = null;  // the speaker button in "speaking" state
+
+  function ttsSupported() {
+    return typeof window !== 'undefined' && 'speechSynthesis' in window &&
+      !!window.speechSynthesis && typeof window.speechSynthesis.speak === 'function';
+  }
+
+  /* Voice language for one question. The bank stores no language
+     field, so the exam's language is the script of the question
+     itself (same detector as translation); when the text has no
+     letters at all (numbers only), the UI language is the fallback. */
+  function ttsLangFor(q) {
+    var text = (q.question || '') + ' ' + ((q.options || []).join(' '));
+    var hasAr = /[\u0600-\u06FF\u0750-\u077F]/.test(text);
+    var hasLat = /[A-Za-z]/.test(text);
+    if (hasAr && !hasLat) return 'ar-EG';
+    if (hasLat && !hasAr) return 'en-US';
+    if (hasAr && hasLat) return detectExamLang([q]) === 'ar' ? 'ar-EG' : 'en-US';
+    return getLang() === 'ar' ? 'ar-EG' : 'en-US';
+  }
+
+  function ttsVoiceFor(lang) {
+    if (!ttsSupported()) return null;
+    try {
+      var voices = window.speechSynthesis.getVoices() || [];
+      var prefix = lang.split('-')[0];
+      var i, v = null;
+      for (i = 0; i < voices.length; i++) {
+        if (voices[i].lang === lang) { v = voices[i]; break; }
+      }
+      if (!v) {
+        for (i = 0; i < voices.length; i++) {
+          if ((voices[i].lang || '').split('-')[0] === prefix) { v = voices[i]; break; }
+        }
+      }
+      return v;
+    } catch (e) { return null; }
+  }
+
+  /* Plain spoken text for one question, per type. MCQ / True-False
+     read the options in their DISPLAY order (the shuffled order on
+     screen) with their on-screen letters, so what you hear matches
+     what you see. Matching reads the left items, then the right
+     partners in their displayed order — never paired, so the answer
+     is not given away. Ordering reads the items in their current
+     on-screen order, for the same reason. Essay / fill-in read the
+     question only; coding never reads code aloud. */
+  function speakTextFor(q, display) {
+    var qt = qType(q);
+    var parts = [(q.question || '').trim()];
+    if (qt === 'mcq' || qt === 'tf') {
+      var texts = (display && display.opts) || (q.options || []);
+      texts.forEach(function (text, i) {
+        parts.push((LETTERS[i] || '') + '. ' + text);
+      });
+    } else if (qt === 'matching') {
+      (q.pairs || []).forEach(function (p) { parts.push(p.left); });
+      var rights = (display && display.rights) ||
+        (q.pairs || []).map(function (p) { return p.right; });
+      rights.forEach(function (r) { parts.push(r); });
+    } else if (qt === 'ordering') {
+      var items = (display && display.items) || (q.items || []);
+      items.forEach(function (s, i) { parts.push((i + 1) + '. ' + s); });
+    }
+    return parts.filter(function (s) { return s && String(s).trim(); }).join('. ');
+  }
+
+  /* Display order for the current quiz position, for speech: the
+     shuffled option order (MCQ/TF), the shuffled right column
+     (matching), or the current on-screen order (ordering). */
+  function ttsDisplayFor(pos) {
+    if (!run) return null;
+    var q = quiz.questions[run.qIndexes[pos]];
+    var qt = qType(q);
+    if (qt === 'mcq' || qt === 'tf') {
+      return { opts: (run.optOrders[pos] || []).map(function (o) { return o.text; }) };
+    }
+    if (qt === 'matching') {
+      return { rights: (run.matchOrders[pos] || []).slice() };
+    }
+    if (qt === 'ordering') {
+      var cur = run.answers[pos] ? run.answers[pos].order
+        : ((run.orderDrafts[pos] || run.orderOrders[pos]) || []);
+      return { items: (cur || []).slice() };
+    }
+    return null;
+  }
+
+  function setSpeakBtnState(btn, speaking) {
+    if (!btn) return;
+    btn.classList.toggle('speaking', speaking);
+    btn.setAttribute('aria-pressed', speaking ? 'true' : 'false');
+    btn.setAttribute('aria-label', speaking ? t('ttsStopAria') : t('ttsListenAria'));
+    btn.textContent = speaking ? t('ttsStop') : t('ttsListen');
+  }
+
+  function stopSpeech() {
+    if (ttsCurrentBtn) setSpeakBtnState(ttsCurrentBtn, false);
+    ttsCurrentBtn = null;
+    ttsSpeaking = false;
+    if (!ttsSupported()) return;
+    try { window.speechSynthesis.cancel(); } catch (e) {}
+  }
+
+  /* Read one question aloud. Returns false when speech is
+     unavailable or there is nothing to read. `btn` is the speaker
+     button that started it (it becomes the Stop button while the
+     utterance plays); pass null for auto-read without a button. */
+  function speakQuestion(q, display, btn) {
+    if (!ttsSupported() || !q) return false;
+    var text = speakTextFor(q, display);
+    if (!text) return false;
+    stopSpeech();
+    var lang = ttsLangFor(q);
+    var u;
+    try {
+      u = new SpeechSynthesisUtterance(text);
+    } catch (e) { return false; }
+    u.lang = lang;
+    u.rate = settings.speechRate || 1;
+    var voice = ttsVoiceFor(lang);
+    if (voice) u.voice = voice;
+    ttsSpeaking = true;
+    ttsCurrentBtn = btn || null;
+    if (btn) setSpeakBtnState(btn, true);
+    u.onend = function () {
+      ttsSpeaking = false;
+      if (btn) setSpeakBtnState(btn, false);
+      if (ttsCurrentBtn === btn) ttsCurrentBtn = null;
+    };
+    u.onerror = function () {
+      ttsSpeaking = false;
+      if (btn) setSpeakBtnState(btn, false);
+      if (ttsCurrentBtn === btn) ttsCurrentBtn = null;
+    };
+    try {
+      window.speechSynthesis.speak(u);
+    } catch (e) {
+      ttsSpeaking = false;
+      if (btn) setSpeakBtnState(btn, false);
+      ttsCurrentBtn = null;
+      return false;
+    }
+    return true;
+  }
+
+  /* One speaker button: "🔊 Listen" while idle, "⏹ Stop" while
+     speaking. Clicking while speaking stops. Returns null when the
+     browser has no speechSynthesis, so no button is ever shown that
+     cannot work. */
+  function makeSpeakButton(q, display) {
+    if (!ttsSupported()) return null;
+    var b = el('button', 'btn btn-secondary btn-small speak-btn', t('ttsListen'));
+    b.type = 'button';
+    b.setAttribute('aria-label', t('ttsListenAria'));
+    b.setAttribute('aria-pressed', 'false');
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      b.blur();
+      if (ttsSpeaking && ttsCurrentBtn === b) { stopSpeech(); return; }
+      speakQuestion(q, display, b);
+    });
+    return b;
+  }
+
+  /* Debug/test handle for text-to-speech. */
+  window.__qfTts = {
+    supported: ttsSupported,
+    speaking: function () { return ttsSpeaking; },
+    speakQuestion: speakQuestion,
+    stop: stopSpeech,
+    textFor: speakTextFor,
+    langFor: ttsLangFor,
+    state: function () {
+      return {
+        supported: ttsSupported(), speaking: ttsSpeaking,
+        autoRead: settings.autoRead, rate: settings.speechRate
+      };
+    }
+  };
+
   /* ---------- quiz engine: run ---------- */
 
   function startQuiz(qIndexes, opts) {
     stopTimers();
+    stopSpeech();
     var indexes;
     if (qIndexes) {
       indexes = qIndexes.slice();
@@ -4353,6 +4597,11 @@
   }
 
   function renderQuestion() {
+    /* Any re-render stops the current reading — a submit, a language
+       switch, or moving to another question never talks over the
+       new screen. Auto-read below speaks again only for a new
+       position. */
+    stopSpeech();
     var pos = run.current;
     var qi = run.qIndexes[pos];
     var q = quiz.questions[qi];
@@ -4425,6 +4674,11 @@
     if (run.isReview) {
       meta.appendChild(el('span', 'topic-tag rev-streak',
         t('revStreak', { n: reviewStreak(quiz, q) })));
+    }
+    var speakBtn = makeSpeakButton(q, ttsDisplayFor(pos));
+    if (speakBtn) {
+      speakBtn.id = 'speak-btn';
+      meta.appendChild(speakBtn);
     }
     card.appendChild(meta);
     card.appendChild(el('h2', 'q-text', q.question));
@@ -4763,6 +5017,15 @@
     }
 
     if (!state && settings.perQTimer) startPerQTimer();
+
+    /* Auto-read: read the question aloud when it first appears —
+       once per position, so a re-render (submit, language switch,
+       moving an ordering item) does not read it again. */
+    if (settings.autoRead && run.ttsAutoPos !== pos) {
+      run.ttsAutoPos = pos;
+      var autoBtn = document.getElementById('speak-btn');
+      speakQuestion(q, ttsDisplayFor(pos), autoBtn || null);
+    }
   }
 
   /* Submit a fill-in or essay answer. Fill-in is graded locally and
@@ -5118,6 +5381,7 @@
   }
 
   function nextQuestion() {
+    stopSpeech();
     if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
     if (run.current < run.qIndexes.length - 1) {
       run.current++;
@@ -5144,6 +5408,7 @@
 
   function showResults() {
     stopTimers();
+    stopSpeech();
     if (run.isReview) { showReviewResults(); return; }
     if (run) run.resultsShown = true;
     /* A strict attempt ends here: leave fullscreen, and a re-take from
@@ -5228,6 +5493,11 @@
             : (a && a.timedOut ? t('resTimeout') : t('resWrong'))));
       item.appendChild(status);
       item.appendChild(el('div', 'rq', (pos + 1) + '. ' + q.question));
+      var resSpeak = makeSpeakButton(q, ttsDisplayFor(pos));
+      if (resSpeak) {
+        resSpeak.id = 'speak-btn-' + pos;
+        item.appendChild(resSpeak);
+      }
       if (q.code) {
         var pre = el('pre', 'q-code');
         pre.textContent = q.code;
@@ -5378,6 +5648,7 @@
      which onPick/onTimeout already updated. */
   function showReviewResults() {
     stopTimers();
+    stopSpeech();
     if (run) run.reviewDone = true;
     var bank = run.reviewBank || quiz;
     var total = run.reviewTotal || run.qIndexes.length;

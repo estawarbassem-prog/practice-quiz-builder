@@ -61,6 +61,19 @@
       <span data-i18n="setSeconds">Seconds per question:</span>
       <input type="number" id="set-seconds" min="5" max="600" value="60">
     </label>
+    <label class="set-row" id="set-autoread-row">
+      <input type="checkbox" id="set-autoread">
+      <span data-i18n="setAutoRead">Read each question aloud automatically</span>
+    </label>
+    <label class="set-row" id="set-rate-row">
+      <span data-i18n="setSpeechRate">Reading speed:</span>
+      <select id="set-rate" class="set-select">
+        <option value="0.8" data-i18n="setRateSlow">Slow</option>
+        <option value="1" data-i18n="setRateNormal">Normal</option>
+        <option value="1.25" data-i18n="setRateFast">Fast</option>
+      </select>
+    </label>
+    <p class="set-note" id="set-tts-note" data-i18n="ttsNoSupport" hidden>Your browser does not support reading aloud.</p>
     <p class="set-note" data-i18n="setNote">Settings are saved on this device and apply to the next question you start.</p>
   </div>
 </div>

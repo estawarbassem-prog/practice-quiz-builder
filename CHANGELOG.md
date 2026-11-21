@@ -4,6 +4,50 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-21 — Read questions aloud (text-to-speech)
+
+- **🔊 Listen button on every question** — the quiz screen, each
+  flashcard front, and every row of the results review all have a
+  speaker button that reads the question aloud with the Web Speech
+  API (`window.speechSynthesis`): on-device, no network, no API key.
+  While it speaks the button becomes a ⏹ Stop button. Multiple
+  choice and True/False questions are read with their on-screen
+  letters (A, B, C…) in the shuffled order shown; matching reads the
+  left items then the right partners in their displayed order, and
+  ordering reads the items in their current on-screen order — never
+  paired or in the correct order, so the answer is never given away.
+  Essay and fill-in questions read the question text only; coding
+  questions never read code aloud.
+- **Auto-read + reading speed in Settings** — an "auto-read" toggle
+  (off by default) reads each new question automatically as it
+  appears, and a speed selector (Slow / Normal / Fast: 0.8× / 1× /
+  1.25×) sets the pace. Both are saved on the device and survive a
+  reload.
+- **Voice follows the exam's language** — Arabic-script questions
+  are read with an `ar-EG` voice, English ones with `en-US`; a
+  matching voice is picked when the browser has one, otherwise the
+  browser default speaks. When the question has no letters at all
+  (numbers only), the UI language is the fallback.
+- **Speech always stops when you move on** — next question, submit,
+  leaving the quiz, starting a review session, switching the UI
+  language mid-quiz, or changing view all stop the current reading
+  through one shared `stopSpeech()`.
+- **Honest no-support path** — when the browser has no
+  `speechSynthesis`, no speaker button is shown anywhere and the
+  settings panel says so plainly instead of pretending it works.
+- 10 new i18n keys (English + Arabic); works in both languages and in
+  dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against a fake
+  `speechSynthesis` — 83 checks passed (72 in the supported run +
+  11 in the no-support run): speaker button speaks the right text
+  with lettered options, stop cancels, auto-read fires on question
+  render and stops on navigation, settings persist across reload,
+  rate setting honoured, no-support path hides buttons and shows
+  the plain note, flashcard + results-review buttons, Arabic voice
+  selection (`ar-EG`) and matching/ordering/coding spoken-text
+  shapes, plus a full demo quiz run, flashcards, dark mode, Arabic
+  UI, 390px, zero console errors.
+
 ## 2026-11-20 — Whole-library backup (Feature 16 of 15)
 
 - **Export library** — a "💾 Export library (.json)" button in My exams

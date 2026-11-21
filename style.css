@@ -195,7 +195,22 @@ body.dark .ic-moon { display: none; }
   padding: 4px 8px; border: 2px solid var(--ink); border-radius: 8px;
   background: var(--input-bg); color: var(--ink);
 }
+.set-row select {
+  font-family: inherit; font-size: .92rem;
+  padding: 4px 8px; border: 2px solid var(--ink); border-radius: 8px;
+  background: var(--input-bg); color: var(--ink); cursor: pointer;
+}
+.set-row[hidden], .set-note[hidden] { display: none; }
 .set-note { font-size: .82rem; color: var(--muted); margin-top: 8px; }
+
+/* Text-to-speech: speaker button on questions, flashcards and
+   review rows. While speaking it fills blue so the state is
+   obvious in light and dark mode. */
+.speak-btn { align-self: center; }
+.speak-btn.speaking { background: var(--btn-bg); color: var(--btn-text); }
+.q-meta .speak-btn { margin-inline-start: 2px; }
+.fc-front .speak-btn { margin-top: 10px; }
+.review-item .speak-btn { margin: 4px 0 6px; }
 
 /* ---------- start screen: dashboard ---------- */
 

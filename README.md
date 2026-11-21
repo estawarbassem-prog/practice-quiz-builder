@@ -233,6 +233,33 @@ direction in RTL), flip with a tap/click or Space/Enter, and reshuffle
 the deck with the Shuffle toggle. Works in English and Arabic, in
 light and dark mode.
 
+## Read questions aloud
+
+Every question has a **🔊 Listen** button — on the quiz screen, on the
+front of each flashcard, and on every row of the results review — that
+reads the question aloud using your browser's built-in speech
+(`window.speechSynthesis`): on-device, no network, no API key. While
+it speaks, the button becomes a **⏹ Stop** button.
+
+- Multiple choice and True/False questions are read with their
+  on-screen letters (A, B, C…) in the order shown; matching reads the
+  left items then the right partners in their displayed order, and
+  ordering reads the items in their current on-screen order — never
+  paired or in the correct order, so the answer is never given away.
+  Essay and fill-in questions read the question text only; coding
+  questions never read code aloud.
+- **Settings** has an auto-read toggle (off by default) that reads each
+  new question automatically as it appears, and a reading-speed
+  selector (Slow / Normal / Fast). Both are saved on the device.
+- The voice follows the exam's language — Arabic-script questions are
+  read with an Arabic voice, English ones with an English voice (a
+  matching voice is picked when the browser has one, otherwise the
+  browser default speaks).
+- Speech always stops when you move on: next question, submit, leaving
+  the quiz, starting a review session, switching the UI language
+  mid-quiz, or changing view. If your browser does not support reading
+  aloud, no speaker button is shown and Settings says so plainly.
+
 ## Strict exam mode
 
 Turn on **Strict exam mode** on the exam start screen (off by default,
