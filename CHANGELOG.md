@@ -4,6 +4,31 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — Phase 3: project description + screenshots
+
+- **README rewritten: 359 lines (was 656), concise but substantive.**
+  Every one of the 25 features gets 2–4 weighty lines — what it does
+  and why it matters — grouped under Generate / Take the exam / Learn
+  from it / Share, print & reuse. Stale claims fixed: service-worker
+  cache `quizforge-v1` → `v4`, demo bank "10 verified questions" →
+  16 questions (10 MCQ, 3 true/false, 1 matching, 1 ordering,
+  1 coding). Model defaults re-checked against app.js and kept as-is.
+- **Full Arabic section added** — a condensed mirror of the English
+  README in Egyptian-friendly Arabic, wrapped in
+  `<div dir="rtl" lang="ar">` for correct RTL rendering on GitHub.
+- **41 screenshots in docs/screenshots/**, organized by feature in the
+  README with one-line captions: every main screen and option —
+  wizard steps, settings (all 7 question types), library, quiz,
+  results + review, flashcards, stats, chat, past-exam analysis, oral
+  exam, cheat sheet, strict mode, translation, backup, share link,
+  offline bar, dark mode, and mobile 390px. 14 new shots captured
+  with headless Chrome (mock provider only); 13 older shots re-shot
+  because the UI had moved on (demo bank 10 → 16 questions, new
+  buttons on the start screen and library). Screenshots are PNGs:
+  they live in the repo folder locally and are uploaded to GitHub via
+  the web UI (the push connector cannot carry binaries).
+- No code behaviour changed in this phase.
+
 ## 2026-11-22 — Phase 2: harden + organize all features
 
 - **A full hardening pass over every feature, in five parts, with no
