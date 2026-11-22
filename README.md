@@ -1,5 +1,7 @@
 # QuizForge — Turn any material into exams
 
+![QuizForge — Turn any material into an exam](docs/banner.png)
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-1668E8.svg)](LICENSE)
 ![No dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
 ![No build step](https://img.shields.io/badge/build-none-brightgreen)

@@ -4,6 +4,14 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — Repo styling: banner + topics
+
+- **Banner added at the top of the README** (`docs/banner.png`,
+  beige #F3EFE6 with the QuizForge wordmark, tagline and a sample
+  question card — same identity as the app). Repo topics set on
+  GitHub for discoverability. No text added — README stays at the
+  simplified length.
+
 ## 2026-11-22 — README simplified
 
 - **README cut from 359 lines to 174: screenshots do the talking now.**
