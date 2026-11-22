@@ -5,6 +5,12 @@
    {title, subtitle, questions[]}. Exam generation is bring-your-own-key:
    the user's API key lives only in their own browser's localStorage and is
    sent only to the provider they choose. */
+/* Sections (in file order): helpers - validation - question types -
+   persistence - smart review - flashcards - views/navigation - wizard
+   (steps 1-4) - provider calls - translation - generation - summary -
+   variant - chat - past-exam analysis - library & backup - print -
+   cheat sheet - stats - share - settings panel - quiz engine (timers,
+   start, TTS, oral, run, results) - shortcuts - boot. */
 (function () {
   'use strict';
 
@@ -12,6 +18,16 @@
   var quiz = null;         // current question bank {title, subtitle, questions[]}
   var sampleQuiz = null;   // the bundled questions.json demo bank
   var LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'];
+  /* Option letter for a 0-based option index. LETTERS only covers
+     A–F, but validate() allows any option count (an imported bank
+     can have 7+ options), so anything past F falls back to its
+     1-based number instead of printing "undefined". A missing or
+     negative index (no correct option found) renders as nothing,
+     never "NaN" or "undefined". */
+  function letterFor(idx) {
+    if (typeof idx !== 'number' || !isFinite(idx) || idx < 0) return '';
+    return LETTERS[idx] || String(idx + 1);
+  }
   var LS_SETTINGS = 'pqb-settings';
   var LS_BEST = 'pqb-best';
   var LS_DARK = 'pqb-dark';
@@ -165,6 +181,36 @@
     if (bytes < 1024) return bytes + ' B';
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+
+  /* Today's date as YYYY-MM-DD, the library's date stamp. */
+  function todayStr() { return new Date().toISOString().slice(0, 10); }
+
+  /* Unique library-entry id: prefix + timestamp + random suffix, so
+     two imports in the same millisecond still get different ids. */
+  function newId(prefix) {
+    return prefix + '-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+  }
+
+  /* Status boxes: a small message line under a screen header
+     (#backup-status, #import-error, #gen-success). One helper for
+     showing (sets the text and reveals it) and one for hiding, so
+     call sites stop repeating the two-line pattern - and so a message
+     never lands in a box that does not exist. */
+  function showStatusBox(box, msg) {
+    if (!box) return;
+    box.textContent = msg;
+    box.classList.add('show');
+  }
+
+  function hideStatusBox(box) {
+    if (box) box.classList.remove('show');
+  }
+
+  /* Both file imports (a single bank, a whole-library backup) show
+     the same "could not read the file" message in #import-error. */
+  function showImportReadError() {
+    showStatusBox(document.getElementById('import-error'), t('libReadErr'));
   }
 
   function esc(s) {
@@ -420,45 +466,61 @@
 
   /* ---------- persistence ---------- */
 
+  /* Shared localStorage access (Phase 2 hardening): every read
+     tolerates a missing key, corrupt JSON or a denied store and
+     falls back to the default; every write reports success, so a
+     full quota is never a silent lost save — callers that must not
+     lose data (library saves) check the return value. */
+  function lsGetJSON(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch (e) { return fallback; }
+  }
+
+  function lsSetJSON(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (e) { return false; }
+  }
+
   function loadSettings() {
     var d = { shuffle: true, perQTimer: false, perQSeconds: 60, autoRead: false, speechRate: 1 };
-    try {
-      var raw = localStorage.getItem(LS_SETTINGS);
-      if (raw) {
-        var s = JSON.parse(raw);
-        if (typeof s.shuffle === 'boolean') d.shuffle = s.shuffle;
-        if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
-        if (typeof s.perQSeconds === 'number' && s.perQSeconds >= 5 && s.perQSeconds <= 600)
-          d.perQSeconds = Math.round(s.perQSeconds);
-        if (typeof s.autoRead === 'boolean') d.autoRead = s.autoRead;
-        if (typeof s.speechRate === 'number' && TTS_RATES.indexOf(s.speechRate) !== -1)
-          d.speechRate = s.speechRate;
-      }
-    } catch (e) { /* corrupted settings: fall back to defaults */ }
+    var s = lsGetJSON(LS_SETTINGS, null);
+    if (s && typeof s === 'object') {
+      if (typeof s.shuffle === 'boolean') d.shuffle = s.shuffle;
+      if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
+      if (typeof s.perQSeconds === 'number' && s.perQSeconds >= 5 && s.perQSeconds <= 600)
+        d.perQSeconds = Math.round(s.perQSeconds);
+      if (typeof s.autoRead === 'boolean') d.autoRead = s.autoRead;
+      if (typeof s.speechRate === 'number' && TTS_RATES.indexOf(s.speechRate) !== -1)
+        d.speechRate = s.speechRate;
+    }
     return d;
   }
 
   function saveSettings() {
-    try { localStorage.setItem(LS_SETTINGS, JSON.stringify(settings)); } catch (e) {}
+    lsSetJSON(LS_SETTINGS, settings);
   }
 
   function loadBest() {
-    try {
-      var raw = localStorage.getItem(LS_BEST);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+    var best = lsGetJSON(LS_BEST, null);
+    /* A hand-edited or older value without a numeric best percentage
+       is not a best score — without this, saveBest() would compare
+       against undefined and never record a new best. */
+    return (best && typeof best === 'object' && typeof best.pct === 'number') ? best : null;
   }
 
   function saveBest(score, total, pct) {
     var best = loadBest();
     if (!best || pct > best.pct) {
-      try {
-        localStorage.setItem(LS_BEST, JSON.stringify({
-          score: score, total: total, pct: pct,
-          bank: quiz.title || 'Practice Quiz',
-          date: new Date().toISOString().slice(0, 10)
-        }));
-      } catch (e) {}
+      lsSetJSON(LS_BEST, {
+        score: score, total: total, pct: pct,
+        bank: quiz.title || 'Practice Quiz',
+        date: todayStr()
+      });
     }
   }
 
@@ -474,22 +536,19 @@
      provider the user picked. Never logged, never shown in full. */
   function loadByok() {
     var d = { provider: 'gemini', apiKey: '', model: '', baseUrl: '', proxyUrl: '' };
-    try {
-      var raw = localStorage.getItem(LS_BYOK);
-      if (raw) {
-        var s = JSON.parse(raw);
-        if (s.provider && PROVIDERS[s.provider]) d.provider = s.provider;
-        if (typeof s.apiKey === 'string') d.apiKey = s.apiKey;
-        if (typeof s.model === 'string') d.model = s.model;
-        if (typeof s.baseUrl === 'string') d.baseUrl = s.baseUrl;
-        if (typeof s.proxyUrl === 'string') d.proxyUrl = s.proxyUrl;
-      }
-    } catch (e) {}
+    var s = lsGetJSON(LS_BYOK, null);
+    if (s && typeof s === 'object') {
+      if (s.provider && PROVIDERS[s.provider]) d.provider = s.provider;
+      if (typeof s.apiKey === 'string') d.apiKey = s.apiKey;
+      if (typeof s.model === 'string') d.model = s.model;
+      if (typeof s.baseUrl === 'string') d.baseUrl = s.baseUrl;
+      if (typeof s.proxyUrl === 'string') d.proxyUrl = s.proxyUrl;
+    }
     return d;
   }
 
   function saveByok() {
-    try { localStorage.setItem(LS_BYOK, JSON.stringify(byok)); } catch (e) {}
+    lsSetJSON(LS_BYOK, byok);
   }
 
   function effectiveModel() {
@@ -505,46 +564,47 @@
   function loadWizard() {
     var d = { step: 1, title: '', count: 10, types: { mcq: true, tf: false, essay: false, fill: false, coding: false, matching: false, ordering: false },
       difficulty: 'Mixed', language: 'English', focus: '', perQTimer: false };
-    try {
-      var raw = localStorage.getItem(LS_WIZ);
-      if (raw) {
-        var s = JSON.parse(raw);
-        if (typeof s.step === 'number' && s.step >= 1 && s.step <= 4) d.step = s.step;
-        if (typeof s.title === 'string') d.title = s.title;
-        if (typeof s.count === 'number') d.count = Math.max(5, Math.min(50, Math.round(s.count)));
-        if (s.types) {
-          if (typeof s.types.mcq === 'boolean') d.types.mcq = s.types.mcq;
-          if (typeof s.types.tf === 'boolean') d.types.tf = s.types.tf;
-          if (typeof s.types.essay === 'boolean') d.types.essay = s.types.essay;
-          if (typeof s.types.fill === 'boolean') d.types.fill = s.types.fill;
-          if (typeof s.types.coding === 'boolean') d.types.coding = s.types.coding;
-          if (typeof s.types.matching === 'boolean') d.types.matching = s.types.matching;
-          if (typeof s.types.ordering === 'boolean') d.types.ordering = s.types.ordering;
-        }
-        if (typeof s.difficulty === 'string') d.difficulty = s.difficulty;
-        if (typeof s.language === 'string') d.language = s.language;
-        if (typeof s.focus === 'string') d.focus = s.focus;
-        if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
+    var s = lsGetJSON(LS_WIZ, null);
+    if (s && typeof s === 'object') {
+      if (typeof s.step === 'number' && s.step >= 1 && s.step <= 4) d.step = s.step;
+      if (typeof s.title === 'string') d.title = s.title;
+      if (typeof s.count === 'number') d.count = Math.max(5, Math.min(50, Math.round(s.count)));
+      if (s.types) {
+        if (typeof s.types.mcq === 'boolean') d.types.mcq = s.types.mcq;
+        if (typeof s.types.tf === 'boolean') d.types.tf = s.types.tf;
+        if (typeof s.types.essay === 'boolean') d.types.essay = s.types.essay;
+        if (typeof s.types.fill === 'boolean') d.types.fill = s.types.fill;
+        if (typeof s.types.coding === 'boolean') d.types.coding = s.types.coding;
+        if (typeof s.types.matching === 'boolean') d.types.matching = s.types.matching;
+        if (typeof s.types.ordering === 'boolean') d.types.ordering = s.types.ordering;
       }
-    } catch (e) {}
+      /* A hand-edited or corrupt value must never reach the AI
+         prompt as-is: only the known difficulties / languages are
+         accepted, anything else falls back to the defaults. */
+      if (['Easy', 'Medium', 'Hard', 'Mixed'].indexOf(s.difficulty) !== -1) d.difficulty = s.difficulty;
+      if (['English', 'Arabic'].indexOf(s.language) !== -1) d.language = s.language;
+      if (typeof s.focus === 'string') d.focus = s.focus;
+      if (typeof s.perQTimer === 'boolean') d.perQTimer = s.perQTimer;
+    }
     return d;
   }
 
   function saveWizard() {
-    try { localStorage.setItem(LS_WIZ, JSON.stringify(wiz)); } catch (e) {}
+    lsSetJSON(LS_WIZ, wiz);
   }
 
   function loadLibrary() {
-    try {
-      var raw = localStorage.getItem(LS_LIB);
-      var list = raw ? JSON.parse(raw) : [];
-      return Array.isArray(list) ? list : [];
-    } catch (e) { return []; }
+    var list = lsGetJSON(LS_LIB, []);
+    return Array.isArray(list) ? list : [];
   }
 
+  /* Returns true when the library was actually written. A full
+     quota (QuotaExceededError) returns false instead of failing
+     silently — generation and import check this and say so. */
   function saveLibrary(list) {
-    try { localStorage.setItem(LS_LIB, JSON.stringify(list)); } catch (e) {}
+    var ok = lsSetJSON(LS_LIB, list);
     updateLibCount();
+    return ok;
   }
 
   function updateLibCount() {
@@ -587,15 +647,12 @@
   }
 
   function loadReview() {
-    try {
-      var raw = localStorage.getItem(LS_REVIEW);
-      var d = raw ? JSON.parse(raw) : {};
-      return d && typeof d === 'object' ? d : {};
-    } catch (e) { return {}; }
+    var d = lsGetJSON(LS_REVIEW, {});
+    return d && typeof d === 'object' ? d : {};
   }
 
   function saveReview(d) {
-    try { localStorage.setItem(LS_REVIEW, JSON.stringify(d)); } catch (e) {}
+    lsSetJSON(LS_REVIEW, d);
   }
 
   function reviewEntries(bank) {
@@ -625,7 +682,7 @@
     var items = d[key].items;
     wrongIndexes.forEach(function (qi) {
       var id = qId(bank.questions[qi]);
-      if (!items[id]) items[id] = { streak: 0, added: new Date().toISOString().slice(0, 10) };
+      if (!items[id]) items[id] = { streak: 0, added: todayStr() };
     });
     saveReview(d);
   }
@@ -658,6 +715,24 @@
     return item ? (item.streak || 0) : 0;
   }
 
+  /* One place for "this answer counts in a review session": correct
+     bumps the streak (REV_NEEDED in a row masters the question),
+     wrong resets it to 0, and an ungraded answer (correct === null:
+     essay/oral with no key, or grading that failed) leaves the
+     streak untouched instead of punishing a question that was never
+     actually graded. Also keeps run.reviewMastered in sync, so the
+     review-results screen counts mastered questions correctly. */
+  function applyReviewResult(q, correct) {
+    if (!run || !run.isReview) return;
+    if (correct === null || correct === undefined) {
+      run.reviewLast = { streak: reviewStreak(quiz, q), mastered: false };
+      return;
+    }
+    var r = recordReviewAnswer(quiz, q, correct);
+    run.reviewLast = r;
+    if (r.mastered) run.reviewMastered++;
+  }
+
   function clearReviewFor(bank) {
     var d = loadReview();
     delete d[bankKey(bank)];
@@ -671,20 +746,16 @@
      malformed/corrupt entry falls back to an empty list, so an older
      shape or a hand-edited value can never break the dashboard. */
   function loadStats() {
-    try {
-      var raw = localStorage.getItem(LS_STATS);
-      if (!raw) return [];
-      var list = JSON.parse(raw);
-      if (!Array.isArray(list)) return [];
-      return list.filter(function (a) {
-        return a && typeof a === 'object' && Array.isArray(a.items) &&
-          typeof a.total === 'number' && typeof a.score === 'number';
-      });
-    } catch (e) { return []; }
+    var list = lsGetJSON(LS_STATS, []);
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (a) {
+      return a && typeof a === 'object' && Array.isArray(a.items) &&
+        typeof a.total === 'number' && typeof a.score === 'number';
+    });
   }
 
   function saveStats(list) {
-    try { localStorage.setItem(LS_STATS, JSON.stringify(list)); } catch (e) {}
+    lsSetJSON(LS_STATS, list);
   }
 
   function recordAttempt(attempt) {
@@ -791,7 +862,11 @@
     if (!fc) return;
     stopSpeech();
     fc.shuffled = !fc.shuffled;
-    fc.order = shuffle(fc.bank.questions.map(function (_, i) { return i; }));
+    /* Off means back to the exam's own order — re-shuffling on
+       every toggle would make "off" a lie. */
+    fc.order = fc.shuffled
+      ? shuffle(fc.bank.questions.map(function (_, i) { return i; }))
+      : fc.bank.questions.map(function (_, i) { return i; });
     fc.pos = 0;
     fc.flipped = false;
     renderFlashcards();
@@ -881,7 +956,7 @@
         (q.tests || []).map(function (tc) { return tc.input + ' → ' + tc.expected; }).join(' · ')));
       backFace.appendChild(el('p', 'fc-meta', t('codeLangNote')));
     } else {
-      var letter = LETTERS[q.answer] || '';
+      var letter = letterFor(q.answer);
       var ansText = qt === 'tf' ? tfDisplayText(q.options[q.answer]) : q.options[q.answer];
       backFace.appendChild(el('p', 'fc-answer', t('fcAnswer') + (letter ? letter + ' — ' : '') + ansText));
     }
@@ -926,17 +1001,18 @@
   }
 
   /* Keyboard: Space/Enter flips, arrows move. In RTL the forward
-     direction is left, so the arrow mapping follows the page dir. */
+     direction is left, so the arrow mapping follows the page dir.
+     Arrows work even when a button has focus (arrows never activate
+     a button); Space/Enter are left to the focused button itself,
+     or to the card when it has focus, so one press never flips on
+     top of the button's own action. */
   document.addEventListener('keydown', function (e) {
     if (!fc) return;
     var tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-    /* A focused button handles Space/Enter itself (click) — never
-       flip on top of its own action. The card handles its own keys
-       too, so skip it here to avoid flipping twice. */
-    if (tag === 'BUTTON') return;
-    if (e.target && e.target.id === 'fc-card') return;
     if (e.key === ' ' || e.key === 'Enter') {
+      if (tag === 'BUTTON') return;
+      if (e.target && e.target.id === 'fc-card') return;
       e.preventDefault();
       fcFlip();
     } else if (e.key === 'ArrowRight') {
@@ -1008,7 +1084,17 @@
   /* ---------- views / navigation ---------- */
 
   function setView(v) {
+    /* Leaving mid-quiz from the nav tabs would silently throw the
+       attempt away: confirm first. Results/review-done screens and
+       the 'quiz' target (loadBank) never ask. */
+    if (run && !run.resultsShown && !run.reviewDone &&
+      (v === 'create' || v === 'library' || v === 'stats')) {
+      if (!window.confirm(t('quizExitConfirm'))) return;
+    }
     currentView = v;
+    /* An intentional exit is not a fullscreen escape: mark the
+       attempt warned so the fullscreenchange handler stays silent. */
+    if (run && run.strict) strictWarned = true;
     if (run && run.strict) exitFullscreen();
     stopTimers();
     stopSpeech();
@@ -1502,6 +1588,7 @@
       reader.onload = function () {
         var text = String(reader.result || '');
         pushMaterial({ name: name, size: file.size, kind: 'text', chars: text.length, pages: 0 }, text);
+        noteNonUtf8(name, text);
         resolve();
       };
       reader.onerror = function () { reject(new Error(t('errReadFile', { name: name }))); };
@@ -1512,6 +1599,10 @@
   function pushMaterial(meta, text) {
     clearSummary();
     material.readError = '';
+    /* A later file that reads fine clears the stale "PDF failed"
+       flag too — otherwise the failure note would survive even
+       after a successful upload. */
+    material.pdfFailed = false;
     meta.text = text;
     meta.start = material.text.length;
     material.text += (material.text ? '\n\n' : '') + text;
@@ -1519,6 +1610,16 @@
     material.files.push(meta);
     if (meta.kind === 'pdf') material.pdfPages += (meta.pages || 0);
     if (meta.kind === 'pptx') material.pptxSlides += (meta.pages || 0);
+  }
+
+  /* A text file that is not valid UTF-8 is read with replacement
+     characters (U+FFFD) — silently garbled material would make
+     garbled questions. Keep the text, but warn plainly so the
+     student can re-save the file as UTF-8 or paste it instead.
+     Called after pushMaterial(), which clears readError. */
+  function noteNonUtf8(name, text) {
+    if (String(text || '').indexOf('\uFFFD') !== -1)
+      material.readError = t('txtNonUtf8', { name: name });
   }
 
   /* ---------- generate questions from a link (2026-11-22) ----------
@@ -1723,22 +1824,32 @@
           validate(data);
           var lib = loadLibrary();
           lib.unshift({
-            id: 'bank-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+            id: newId('bank'),
             title: data.title || file.name.replace(/\.json$/i, ''),
             subtitle: data.subtitle || t('libImportedBank', { n: data.questions.length }),
-            date: new Date().toISOString().slice(0, 10),
+            date: todayStr(),
             count: data.questions.length,
             provider: 'import',
             model: '',
             bank: data
           });
-          saveLibrary(lib);
+          if (!saveLibrary(lib)) {
+            /* The bank was not saved — say so instead of listing it
+               as a saved file, or the student will look for an exam
+               that is not there. */
+            material.readError = t('errSaveFailed');
+            var note2 = document.getElementById('pdf-note');
+            if (note2) note2.textContent = material.readError;
+            resolve();
+            return;
+          }
           material.files.push({ name: file.name, size: file.size, kind: 'bank', chars: 0, pages: 0 });
           resolve();
         } catch (e) {
           // Not a valid bank — treat its raw text as material.
           var text = String(reader.result || '');
           pushMaterial({ name: file.name, size: file.size, kind: 'text', chars: text.length, pages: 0 }, text);
+          noteNonUtf8(file.name, text);
           resolve();
         }
       };
@@ -1938,16 +2049,19 @@
     }
     var lib = loadLibrary();
     lib.unshift({
-      id: 'sheet-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+      id: newId('sheet'),
       title: result.bank.title,
       subtitle: result.bank.subtitle,
-      date: new Date().toISOString().slice(0, 10),
+      date: todayStr(),
       count: result.bank.questions.length,
       provider: 'import',
       model: '',
       bank: result.bank
     });
-    saveLibrary(lib);
+    if (!saveLibrary(lib)) {
+      showSheetStatus({ ok: false, error: t('errSaveFailed') });
+      return result;
+    }
     material.files.push({ name: sourceName || t('sheetTitle'), size: 0, kind: 'bank', chars: 0, pages: 0 });
     showSheetStatus({ ok: true, imported: result.imported, skipped: result.skipped });
     refreshFileList();
@@ -1966,24 +2080,39 @@
     });
   }
 
+  /* One lazy CDN script loader for pdf.js, SheetJS and JSZip
+     (Phase 2 hardening): the same load-once promise, the same
+     "library never arrived" error. loadErrKey is the error when
+     the script itself cannot be fetched; initErrKey when it
+     arrives but does not expose its global. onReady runs after a
+     successful load (pdf.js needs its worker path set). A failed
+     load stays rejected, so a retry does not re-add the tag. */
+  var scriptPromises = {};
+  function loadScriptOnce(url, globalName, loadErrKey, initErrKey, onReady) {
+    if (window[globalName]) return Promise.resolve(window[globalName]);
+    if (scriptPromises[url]) return scriptPromises[url];
+    scriptPromises[url] = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = url;
+      s.onload = function () {
+        if (!window[globalName]) { reject(new Error(t(initErrKey))); return; }
+        if (onReady) {
+          try { onReady(window[globalName]); }
+          catch (e) { reject(e); return; }
+        }
+        resolve(window[globalName]);
+      };
+      s.onerror = function () { reject(new Error(t(loadErrKey))); };
+      document.head.appendChild(s);
+    });
+    return scriptPromises[url];
+  }
+
   /* SheetJS loads LAZILY, only when an .xlsx file is added, from
      cdnjs — same pattern as pdf.js. If the CDN cannot be reached,
      the error is shown and CSV paste/upload keep working. */
-  var xlsxPromise = null;
   function loadXlsx() {
-    if (window.XLSX) return Promise.resolve(window.XLSX);
-    if (xlsxPromise) return xlsxPromise;
-    xlsxPromise = new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = XLSX_URL;
-      s.onload = function () {
-        if (!window.XLSX) { reject(new Error(t('sheetXlsxFail'))); return; }
-        resolve(window.XLSX);
-      };
-      s.onerror = function () { reject(new Error(t('sheetXlsxFail'))); };
-      document.head.appendChild(s);
-    });
-    return xlsxPromise;
+    return loadScriptOnce(XLSX_URL, 'XLSX', 'sheetXlsxFail', 'sheetXlsxFail');
   }
 
   function addXlsxFile(file) {
@@ -2010,22 +2139,10 @@
      from cdnjs. Plain text extraction only, no OCR. If the CDN cannot be
      reached, the rest of the app keeps working and the user is told to
      paste the text instead. */
-  var pdfJsPromise = null;
   function loadPdfJs() {
-    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib);
-    if (pdfJsPromise) return pdfJsPromise;
-    pdfJsPromise = new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = PDFJS_URL;
-      s.onload = function () {
-        if (!window.pdfjsLib) { reject(new Error(t('errPdfJsInit'))); return; }
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-        resolve(window.pdfjsLib);
-      };
-      s.onerror = function () { reject(new Error(t('errPdfJsLoad'))); };
-      document.head.appendChild(s);
+    return loadScriptOnce(PDFJS_URL, 'pdfjsLib', 'errPdfJsLoad', 'errPdfJsInit', function (lib) {
+      lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
     });
-    return pdfJsPromise;
   }
 
   function addPdfFile(file) {
@@ -2050,11 +2167,22 @@
       }
       return chain.then(function () {
         var text = pageTexts.join('\n\n');
+        /* A scanned/image-only PDF extracts no text at all — say so
+           plainly instead of adding a 0-character "file" that looks
+           like material and then generates from nothing. */
+        if (!text.trim()) throw new Error(t('errPdfNoText', { name: file.name }));
         pushMaterial({ name: file.name, size: file.size, kind: 'pdf', chars: text.length, pages: pdf.numPages }, text);
       });
     }).catch(function (e) {
       material.pdfFailed = true;
       var msg = t('errReadFileDetail', { name: file.name, detail: e.message });
+      /* Persist the specific message on the material state:
+         refreshFileList() rewrites the note line on every render,
+         so a message kept only in the DOM would be wiped as soon
+         as the list refreshes (the same pattern as officeReadError).
+         Before this, the specific error was overwritten by the
+         generic s1PdfFail line. */
+      material.readError = msg;
       var note = document.getElementById('pdf-note');
       if (note) note.textContent = msg;
       throw new Error(msg);
@@ -2070,21 +2198,8 @@
      speaker notes and Word headers/footers are not read. If the CDN
      cannot be reached, the error is shown and paste / other uploads
      keep working. */
-  var jszipPromise = null;
   function loadJsZip() {
-    if (window.JSZip) return Promise.resolve(window.JSZip);
-    if (jszipPromise) return jszipPromise;
-    jszipPromise = new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = JSZIP_URL;
-      s.onload = function () {
-        if (!window.JSZip) { reject(new Error(t('errJszipInit'))); return; }
-        resolve(window.JSZip);
-      };
-      s.onerror = function () { reject(new Error(t('errJszipLoad'))); };
-      document.head.appendChild(s);
-    });
-    return jszipPromise;
+    return loadScriptOnce(JSZIP_URL, 'JSZip', 'errJszipLoad', 'errJszipInit');
   }
 
   /* Join the text runs of every paragraph in an OOXML part.
@@ -2340,6 +2455,15 @@
     if (btn) btn.disabled = true;
     callProvider('Reply with exactly this JSON and nothing else: {"ok": true}', 1, 'test')
       .then(function (text) {
+        /* A reply that parses as JSON must actually be the
+           {"ok": true} asked for — a model returning some other
+           JSON is not a working connection. A non-JSON reply
+           (e.g. Claude, which has no JSON mode) still counts as
+           connected: any reply means the key and model work. */
+        var parsed = null, isJson = false;
+        try { parsed = JSON.parse(extractJsonText(text)); isJson = true; } catch (e) {}
+        if (isJson && !(parsed && parsed.ok === true))
+          throw new Error(t('errTestBad'));
         if (out) {
           out.className = 'test-out ok';
           out.textContent = t('s2Connected', { label: PROVIDERS[byok.provider].label, model: effectiveModel() });
@@ -2592,8 +2716,7 @@
     genState.error = msg;
     var box = document.getElementById('gen-error');
     if (box) {
-      box.textContent = msg;
-      box.classList.add('show');
+      showStatusBox(box, msg);
       var retry = document.createElement('button');
       retry.className = 'btn btn-secondary btn-small';
       retry.style.marginTop = '8px';
@@ -2675,6 +2798,23 @@
     return data.questions;
   }
 
+  /* One POST-JSON round trip shared by every provider (Phase 2
+     hardening): the same timeout, the same HTTP-error surfacing,
+     the same "the model replied but said nothing" guard. extract
+     maps the provider's JSON envelope to the model's text. */
+  function postProviderJson(url, headers, body, who, extract) {
+    return fetchWithTimeout(url, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body)
+    }).then(function (res) { return readProviderResponse(res, who); })
+    .then(function (data) {
+      var text = extract(data);
+      if (!text) throw new Error(t('errEmptyReply', { who: who }));
+      return text;
+    });
+  }
+
   /* One model call. Returns the raw text of the model's reply.
      mode 'test' sends a tiny prompt; 'gen' sends the full exam prompt. */
   function callProvider(prompt, maxQuestions, mode) {
@@ -2693,63 +2833,56 @@
     if (provider === 'gemini') {
       var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
         encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(key);
-      return fetchWithTimeout(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      return postProviderJson(url,
+        { 'Content-Type': 'application/json' },
+        {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { responseMimeType: 'application/json' }
-        })
-      }).then(function (res) { return readProviderResponse(res, 'Gemini'); })
-      .then(function (data) {
-        var text = data && data.candidates && data.candidates[0] &&
-          data.candidates[0].content && data.candidates[0].content.parts &&
-          data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
-        if (!text) throw new Error(t('errEmptyReply', { who: 'Gemini' }));
-        return text;
-      });
+        },
+        'Gemini',
+        function (data) {
+          return data && data.candidates && data.candidates[0] &&
+            data.candidates[0].content && data.candidates[0].content.parts &&
+            data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+        });
     }
 
     if (provider === 'openai' || provider === 'custom') {
       var base = (provider === 'custom' ? (byok.baseUrl || PROVIDERS.custom.defaultBaseUrl) : 'https://api.openai.com/v1')
         .replace(/\/+$/, '');
-      return fetchWithTimeout(base + '/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
-        body: JSON.stringify({
+      var who = provider === 'custom' ? 'Custom provider' : 'OpenAI';
+      return postProviderJson(base + '/v1/chat/completions',
+        { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+        {
           model: model,
           messages: [{ role: 'user', content: prompt }],
           response_format: { type: 'json_object' }
-        })
-      }).then(function (res) { return readProviderResponse(res, provider === 'custom' ? 'Custom provider' : 'OpenAI'); })
-      .then(function (data) {
-        var text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-        if (!text) throw new Error(t('errEmptyReply', { who: provider === 'custom' ? 'Custom provider' : 'OpenAI' }));
-        return text;
-      });
+        },
+        who,
+        function (data) {
+          return data && data.choices && data.choices[0] && data.choices[0].message &&
+            data.choices[0].message.content;
+        });
     }
 
     // claude — always through the user's CORS proxy
     var proxy = (byok.proxyUrl || '').trim().replace(/\/+$/, '');
-    return fetchWithTimeout(proxy + '/v1/messages', {
-      method: 'POST',
-      headers: {
+    return postProviderJson(proxy + '/v1/messages',
+      {
         'Content-Type': 'application/json',
         'x-api-key': key,
         'anthropic-version': '2023-06-01',
         'anthropic-dangerous-direct-browser-access': 'true'
       },
-      body: JSON.stringify({
+      {
         model: model,
         max_tokens: 4000,
         messages: [{ role: 'user', content: prompt }]
-      })
-    }).then(function (res) { return readProviderResponse(res, 'Claude'); })
-    .then(function (data) {
-      var text = data && data.content && data.content[0] && data.content[0].text;
-      if (!text) throw new Error(t('errEmptyReply', { who: 'Claude' }));
-      return text;
-    });
+      },
+      'Claude',
+      function (data) {
+        return data && data.content && data.content[0] && data.content[0].text;
+      });
   }
 
   function readProviderResponse(res, who) {
@@ -2790,11 +2923,18 @@
   function trLangName(code) { return code === 'ar' ? t('trLangArabic') : t('trLangEnglish'); }
 
   /* Source language by script: Arabic letters vs Latin letters in
-     the translatable prose. Mixed banks follow the majority. */
+     the translatable prose. Mixed banks follow the majority. Every
+     translatable field counts (rubric, matching pairs, ordering
+     items included) — an exam whose prose lives only in its pairs
+     must still detect correctly. */
   function detectExamLang(questions) {
     var ar = 0, lat = 0;
     (questions || []).forEach(function (q) {
-      [q.question, q.explanation, q.justification].concat(q.options || []).forEach(function (s) {
+      var texts = [q.question, q.explanation, q.justification, q.rubric]
+        .concat(q.options || [])
+        .concat((q.pairs || []).reduce(function (acc, p) { return acc.concat([p.left, p.right]); }, []))
+        .concat(q.items || []);
+      texts.forEach(function (s) {
         String(s || '').split('').forEach(function (ch) {
           if (/[\u0600-\u06FF\u0750-\u077F]/.test(ch)) ar++;
           else if (/[A-Za-z]/.test(ch)) lat++;
@@ -2912,7 +3052,11 @@
     if (trState.lang) {
       var srcLang = trState.sourceLang || 'en';
       quiz.questions = trDeepCopy(trState.original);
-      trState.translated = null; trState.lang = null; trState.sourceLang = null;
+      /* Restore clears the whole translation state (original + bank
+         included), so a later loadBank() cannot "restore" a stale
+         original into a bank that was never translated. */
+      trState.original = null;
+      trState.translated = null; trState.lang = null; trState.sourceLang = null; trState.bank = null;
       return Promise.resolve({ ok: true, message: t('trRestored', { lang: trLangName(srcLang) }) });
     }
     if (!byok.apiKey) return Promise.resolve({ ok: false, message: t('trNoKey') });
@@ -3196,7 +3340,14 @@
      screen it goes back to that exam. */
   function showSummaryScreen(ret) {
     if (ret) sumReturn = ret;
-    var data = sumState.data || (quiz && quiz.summary);
+    /* From an exam's start screen the summary shown is the one stored
+       with THAT exam — the wizard's in-progress summary (sumState)
+       describes different material and must never leak into another
+       exam's view. From the wizard the in-progress summary is the
+       one being read. */
+    var data = (sumReturn.kind === 'start' && quiz && quiz.summary)
+      ? quiz.summary
+      : (sumState.data || (quiz && quiz.summary));
     if (!data || !Array.isArray(data.keyPoints)) return;
     currentView = 'summary';
     app.innerHTML = '';
@@ -3445,6 +3596,90 @@
     essayMax: essayMax, essayPass: essayPass, gradeEssay: gradeEssay
   };
 
+  /* Dedupe, validate, save and announce one generated exam.
+     Throws when there are no usable questions (validate) or when
+     the library save itself fails (err.saveFailed) — the caller
+     decides what to show. readyKey is 's4Ready' for a full exam,
+     's4PartialReady' when a chunk failed and only part of it was
+     saved, so the student keeps what worked. */
+  function completeGeneration(allQuestions, fullText, readyKey) {
+    // Dedupe by normalised question text, then shuffle.
+    var seen = {};
+    var deduped = allQuestions.filter(function (q) {
+      var k = String(q.question || '').trim().toLowerCase();
+      if (!k || seen[k]) return false;
+      seen[k] = true;
+      return true;
+    });
+    shuffle(deduped);
+    var title = (wiz.title || '').trim() || t('genDefaultTitle');
+    var bank = {
+      title: title,
+      subtitle: t('genSub', {
+        n: deduped.length,
+        provider: PROVIDERS[byok.provider].label,
+        model: effectiveModel(),
+        difficulty: localizedDifficulty(wiz.difficulty),
+        language: localizedLanguage(wiz.language)
+      }),
+      questions: deduped
+    };
+    /* Feature 9: the summary travels with its exam so it can be
+       re-read later from the exam start screen. */
+    if (sumState.data) bank.summary = sumState.data;
+    validate(bank);
+    var lib = loadLibrary();
+    lib.unshift({
+      id: newId('gen'),
+      title: title,
+      subtitle: bank.subtitle,
+      date: todayStr(),
+      count: deduped.length,
+      provider: PROVIDERS[byok.provider].label,
+      model: effectiveModel(),
+      bank: bank,
+      /* Fresh variant (2026-11-22): keep the source material and the
+         settings this exam was generated with, so a new variant can
+         be made from the same material later. Material over the cap
+         is not stored (see VARIANT_MATERIAL_MAX). */
+      material: fullText.length <= VARIANT_MATERIAL_MAX ? fullText : '',
+      /* Generate from a link (2026-11-22): where the questions came
+         from, shown on the exam card in My exams. */
+      sourceUrl: material.sourceUrl || '',
+      gen: {
+        count: wiz.count,
+        difficulty: wiz.difficulty,
+        language: wiz.language,
+        focus: wiz.focus,
+        types: JSON.parse(JSON.stringify(wiz.types))
+      },
+      variant: 1,
+      baseTitle: title
+    });
+    if (!saveLibrary(lib)) {
+      var err = new Error(t('errSaveFailed'));
+      err.saveFailed = true;
+      throw err;
+    }
+    genState.lastBank = bank;
+    genState.progress = '';
+    var prog = document.getElementById('gen-progress');
+    if (prog) prog.textContent = '';
+    var ok = document.getElementById('gen-success');
+    if (ok) {
+      showStatusBox(ok, t(readyKey, { n: deduped.length }));
+      var take = document.createElement('button');
+      take.className = 'btn btn-primary btn-big';
+      take.style.marginTop = '10px';
+      take.textContent = t('s4TakeNow');
+      take.addEventListener('click', function () { loadBank(bank); });
+      ok.appendChild(take);
+    }
+    var btn = document.getElementById('gen-btn');
+    if (btn) btn.disabled = false;
+    genState.busy = false;
+  }
+
   function generateExam() {
     if (genState.busy) return;
     clearGenError();
@@ -3478,81 +3713,31 @@
     });
 
     chain.then(function () {
-      // Dedupe by normalised question text, then shuffle.
-      var seen = {};
-      var deduped = allQuestions.filter(function (q) {
-        var k = q.question.trim().toLowerCase();
-        if (seen[k]) return false;
-        seen[k] = true;
-        return true;
-      });
-      shuffle(deduped);
-      var title = (wiz.title || '').trim() || t('genDefaultTitle');
-      var bank = {
-        title: title,
-        subtitle: t('genSub', {
-          n: deduped.length,
-          provider: PROVIDERS[byok.provider].label,
-          model: effectiveModel(),
-          difficulty: localizedDifficulty(wiz.difficulty),
-          language: localizedLanguage(wiz.language)
-        }),
-        questions: deduped
-      };
-      /* Feature 9: the summary travels with its exam so it can be
-         re-read later from the exam start screen. */
-      if (sumState.data) bank.summary = sumState.data;
-      validate(bank);
-      var lib = loadLibrary();
-      lib.unshift({
-        id: 'gen-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
-        title: title,
-        subtitle: bank.subtitle,
-        date: new Date().toISOString().slice(0, 10),
-        count: deduped.length,
-        provider: PROVIDERS[byok.provider].label,
-        model: effectiveModel(),
-        bank: bank,
-        /* Fresh variant (2026-11-22): keep the source material and the
-           settings this exam was generated with, so a new variant can
-           be made from the same material later. Material over the cap
-           is not stored (see VARIANT_MATERIAL_MAX). */
-        material: fullText.length <= VARIANT_MATERIAL_MAX ? fullText : '',
-        /* Generate from a link (2026-11-22): where the questions came
-           from, shown on the exam card in My exams. */
-        sourceUrl: material.sourceUrl || '',
-        gen: {
-          count: wiz.count,
-          difficulty: wiz.difficulty,
-          language: wiz.language,
-          focus: wiz.focus,
-          types: JSON.parse(JSON.stringify(wiz.types))
-        },
-        variant: 1,
-        baseTitle: title
-      });
-      saveLibrary(lib);
-      genState.lastBank = bank;
-      genState.progress = '';
-      if (prog) prog.textContent = '';
-      var ok = document.getElementById('gen-success');
-      if (ok) {
-        ok.textContent = t('s4Ready', { n: deduped.length });
-        ok.classList.add('show');
-        var take = document.createElement('button');
-        take.className = 'btn btn-primary btn-big';
-        take.style.marginTop = '10px';
-        take.textContent = t('s4TakeNow');
-        take.addEventListener('click', function () { loadBank(bank); });
-        ok.appendChild(take);
-      }
-      if (btn) btn.disabled = false;
-      genState.busy = false;
+      completeGeneration(allQuestions, fullText, 's4Ready');
     }).catch(function (e) {
       genState.busy = false;
       genState.progress = '';
       if (prog) prog.textContent = '';
       if (btn) btn.disabled = false;
+      /* The save itself failed: nothing was stored, so there is no
+         partial exam to offer — say that plainly, do not retry a
+         save that just failed. */
+      if (e && e.saveFailed) { showGenError(e.message); return; }
+      /* A later chunk failing used to throw away the questions the
+         earlier chunks already produced. Save those as a partial
+         exam instead, and still show the failure plainly — the
+         student keeps what worked and can retry for the rest. */
+      if (allQuestions.length) {
+        try {
+          completeGeneration(allQuestions, fullText, 's4PartialReady');
+          showGenError(plainError(e));
+          return;
+        } catch (e2) {
+          if (e2 && e2.saveFailed) { showGenError(e2.message); return; }
+          /* Nothing usable to save (all duplicates, or nothing
+             validated) — fall through to the plain error. */
+        }
+      }
       showGenError(plainError(e));
     });
   }
@@ -3571,10 +3756,46 @@
      generation it needs a key; with no key, or offline, a plain
      message is shown instead. */
   function showVariantError(errBox, msg) {
-    if (errBox) {
-      errBox.textContent = msg;
-      errBox.classList.add('show');
+    /* The library re-renders on navigation, so a captured error box
+       may be detached by the time generation fails — fall back to
+       the library status box instead of writing into thin air. */
+    if (errBox && !document.contains(errBox))
+      errBox = document.getElementById('backup-status');
+    if (errBox) { showStatusBox(errBox, msg); return; }
+    /* Off the library view there is no #backup-status either: the
+       error used to be silently dropped (the button just reset).
+       A sticky toast is always in the DOM, so the failure is still
+       seen - and the exam is simply not saved, as before. */
+    showToast(msg, true);
+  }
+
+  /* Stored generation settings (entry.gen, or a backup file's gen)
+     are untrusted input: a missing types object would crash
+     buildPrompt, a non-numeric count would ask the provider for
+     NaN questions. Clamp every field to a known-good shape, falling
+     back to the wizard's current settings per field. */
+  function sanitizeGenSettings(g) {
+    var fallback = {
+      count: wiz.count, difficulty: wiz.difficulty, language: wiz.language,
+      focus: wiz.focus, types: JSON.parse(JSON.stringify(wiz.types))
+    };
+    if (!g || typeof g !== 'object') return fallback;
+    var out = {
+      count: (typeof g.count === 'number' && isFinite(g.count))
+        ? Math.max(5, Math.min(50, Math.round(g.count))) : fallback.count,
+      difficulty: ['Easy', 'Medium', 'Hard', 'Mixed'].indexOf(g.difficulty) !== -1
+        ? g.difficulty : fallback.difficulty,
+      language: ['English', 'Arabic'].indexOf(g.language) !== -1
+        ? g.language : fallback.language,
+      focus: (typeof g.focus === 'string') ? g.focus : fallback.focus,
+      types: fallback.types
+    };
+    if (g.types && typeof g.types === 'object') {
+      ['mcq', 'tf', 'essay', 'fill', 'coding', 'matching', 'ordering'].forEach(function (k) {
+        if (typeof g.types[k] === 'boolean') out.types[k] = g.types[k];
+      });
     }
+    return out;
   }
 
   function generateVariant(entry, btn, errBox) {
@@ -3584,11 +3805,9 @@
     var materialText = (entry.material || '').trim();
     if (!materialText) { showVariantError(errBox, t('errNoMaterial')); return; }
     /* Stored settings, or the wizard's current ones if an older entry
-       somehow has material without settings. */
-    var settings = entry.gen || {
-      count: wiz.count, difficulty: wiz.difficulty, language: wiz.language,
-      focus: wiz.focus, types: JSON.parse(JSON.stringify(wiz.types))
-    };
+       somehow has material without settings — sanitized either way,
+       so a corrupt stored gen can never crash the prompt build. */
+    var settings = sanitizeGenSettings(entry.gen);
     if (errBox) errBox.classList.remove('show');
     variantBusy = true;
     if (btn) { btn.disabled = true; btn.textContent = t('variantGenerating'); }
@@ -3606,6 +3825,20 @@
     var prevTexts = {};
     (entry.bank.questions || []).forEach(function (q) {
       prevTexts[String(q.question || '').trim().toLowerCase()] = true;
+    });
+    /* A variant of a variant must not resurrect questions an earlier
+       version already asked: the hard filter covers every saved
+       version sharing this exam's base title, not just the immediate
+       parent. (The prompt's avoid-list above stays parent-only, so
+       the prompt stays bounded.) A shared title across unrelated
+       exams can only over-filter, never leak a repeat. */
+    var baseTitle0 = entry.baseTitle || entry.title;
+    loadLibrary().forEach(function (e) {
+      if (e.id === entry.id || !e.bank || !e.bank.questions) return;
+      if ((e.baseTitle || e.title) !== baseTitle0) return;
+      e.bank.questions.forEach(function (q) {
+        prevTexts[String(q.question || '').trim().toLowerCase()] = true;
+      });
     });
     var allQuestions = [];
     var chain = Promise.resolve();
@@ -3648,10 +3881,10 @@
       validate(bank);
       var lib = loadLibrary();
       lib.unshift({
-        id: 'gen-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+        id: newId('gen'),
         title: newTitle,
         subtitle: bank.subtitle,
-        date: new Date().toISOString().slice(0, 10),
+        date: todayStr(),
         count: deduped.length,
         provider: PROVIDERS[byok.provider].label,
         model: effectiveModel(),
@@ -3662,15 +3895,23 @@
         variant: n,
         baseTitle: baseTitle
       });
-      saveLibrary(lib);
+      if (!saveLibrary(lib)) {
+        variantBusy = false;
+        if (btn) { btn.disabled = false; btn.textContent = t('variantBtn'); }
+        showVariantError(errBox, t('errSaveFailed'));
+        return;
+      }
       variantBusy = false;
-      renderLibrary();
-      /* renderLibrary() rebuilds the header, so the status box must be
-         looked up (and filled) after it, not before. */
-      var okBox = document.getElementById('backup-status');
-      if (okBox) {
-        okBox.textContent = t('variantReady', { title: newTitle, n: deduped.length });
-        okBox.classList.add('show');
+      /* Only re-render the library when the student is still looking
+         at it — generating takes a while, and re-rendering here
+         would yank them out of whatever view they moved to. The
+         exam is saved either way and shows up when they return. */
+      if (currentView === 'library') {
+        renderLibrary();
+        /* renderLibrary() rebuilds the header, so the status box must be
+           looked up (and filled) after it, not before. */
+        var okBox = document.getElementById('backup-status');
+        showStatusBox(okBox, t('variantReady', { title: newTitle, n: deduped.length }));
       }
     }).catch(function (e) {
       variantBusy = false;
@@ -3702,15 +3943,12 @@
   var chatState = null;         // {key, examId, examTitle, files, pasted, text, messages, busy, draft, truncated, readError}
 
   function loadChatStore() {
-    try {
-      var raw = localStorage.getItem(LS_CHAT);
-      var store = raw ? JSON.parse(raw) : {};
-      return store && typeof store === 'object' ? store : {};
-    } catch (e) { return {}; }
+    var store = lsGetJSON(LS_CHAT, {});
+    return store && typeof store === 'object' ? store : {};
   }
 
   function saveChatStore(store) {
-    try { localStorage.setItem(LS_CHAT, JSON.stringify(store)); } catch (e) {}
+    lsSetJSON(LS_CHAT, store);
   }
 
   function saveChatHistory() {
@@ -3738,6 +3976,11 @@
       truncated: text.length > VARIANT_MATERIAL_MAX,
       readError: ''
     };
+    /* The exam's own material is the base text: files pasted or
+       uploaded here EXTEND it (chatRebuildText), they never replace
+       it — without this, adding one file silently dropped the whole
+       exam material from the chat. */
+    chatState.base = chatState.text;
     currentView = 'chat';
     document.getElementById('nav-create').classList.remove('active');
     document.getElementById('nav-library').classList.remove('active');
@@ -3848,7 +4091,9 @@
 
   function chatRebuildText() {
     if (!chatState) return;
-    var parts = chatState.files.map(function (f) { return f.text || ''; });
+    var parts = [];
+    if (chatState.base) parts.push(chatState.base);
+    chatState.files.forEach(function (f) { parts.push(f.text || ''); });
     if (chatState.pasted) parts.push(chatState.pasted);
     var joined = parts.join('\n\n');
     chatState.truncated = joined.length > VARIANT_MATERIAL_MAX;
@@ -3867,6 +4112,12 @@
   function chatAddOneFile(file) {
     var name = file.name || 'file';
     var lower = name.toLowerCase();
+    /* JSON banks and spreadsheets are not material to chat about
+       (a bank has no prose, a sheet's rows are questions) — say so
+       instead of reading the raw file bytes as "material". */
+    if (/\.(json|xlsx|xls)$/.test(lower)) {
+      return Promise.reject(new Error(t('chatBadType', { name: name })));
+    }
     if (lower.endsWith('.pdf')) {
       return extractPdfText(file).then(function (out) {
         if (!out.text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
@@ -3901,6 +4152,10 @@
       reader.onload = function () {
         var text = String(reader.result || '');
         chatPushFile({ name: name, size: file.size, kind: 'text', pages: 0 }, text);
+        /* Non-UTF-8 text reads with replacement characters — keep
+           the text, but warn plainly (same warning as the wizard). */
+        if (chatState && text.indexOf('\uFFFD') !== -1)
+          chatState.readError = t('txtNonUtf8', { name: name });
         resolve();
       };
       reader.onerror = function () { reject(new Error(t('errReadFile', { name: name }))); };
@@ -4217,7 +4472,9 @@
   var pastState = null;             // {exams: [{name,size,kind,year,text,chars,pages}], busy, progress, error, result}
 
   function openPastAnalysis() {
-    pastState = { exams: [], busy: false, progress: '', error: '', result: null };
+    /* Keep already-uploaded exams when the student leaves and comes
+       back — re-initialising here used to silently drop them. */
+    if (!pastState) pastState = { exams: [], busy: false, progress: '', error: '', result: null };
     currentView = 'past';
     document.getElementById('nav-create').classList.remove('active');
     document.getElementById('nav-library').classList.remove('active');
@@ -4242,6 +4499,11 @@
   function pastAddOneFile(file) {
     var name = file.name || 'file';
     var lower = name.toLowerCase();
+    /* PowerPoint, spreadsheets and JSON banks are not past exams —
+       reading their raw bytes as text would analyse garbage. */
+    if (/\.(pptx|xlsx|xls|json)$/.test(lower)) {
+      return Promise.reject(new Error(t('pastBadType', { name: name })));
+    }
     if (lower.endsWith('.pdf')) {
       return extractPdfText(file).then(function (out) {
         if (!out.text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
@@ -4445,7 +4707,10 @@
       pastState.progress = '';
       if (prog) prog.textContent = '';
       if (btn) btn.disabled = false;
-      renderPast();
+      /* Only re-render when the student is still on the past-exam
+         screen — an analysis takes a while, and re-rendering here
+         would yank them out of whatever view they moved to. */
+      if (currentView === 'past') renderPast();
       showPastStatus(t('pastAnalysedNote', { n: exams.length }), true);
     }).catch(function (e) {
       pastState.busy = false;
@@ -4468,9 +4733,13 @@
     var top = rows.filter(function (r) { return r.count >= 2; }).slice(0, PAST_TOP_FOCUS);
     if (!top.length) top = rows.slice(0, Math.min(5, rows.length));
     var focusLines = top.map(function (r, i) {
-      return (i + 1) + '. ' + r.name + ' (appeared in ' + r.count + ' of ' + r.total + ' past exams' +
-        (r.years.length ? ', years: ' + r.years.join(', ') : '') + ')' +
-        (r.description ? ' — ' + r.description : '');
+      /* Localised per-topic line: the focus notes go into the exam
+         prompt, so an Arabic UI must not get English fragments
+         ("appeared in X of Y past exams", "years: ...") baked in. */
+      var line = t('pastFocusLine', { name: r.name, c: r.count, total: r.total });
+      if (r.years.length) line = t('pastFocusLineYears', { line: line, y: r.years.join(', ') });
+      if (r.description) line = t('pastFocusLineDesc', { line: line, d: r.description });
+      return (i + 1) + '. ' + line;
     });
     var fullText = pastState.exams.map(function (e) { return e.text || ''; }).join('\n\n').trim();
     material.files = [];
@@ -4795,7 +5064,10 @@
       }
       var del = el('button', 'btn btn-secondary', t('libDelete'));
       del.addEventListener('click', function () {
-        saveLibrary(loadLibrary().filter(function (x) { return x.id !== entry.id; }));
+        if (!saveLibrary(loadLibrary().filter(function (x) { return x.id !== entry.id; }))) {
+          showToast(t('errSaveFailed'), true);
+          return;
+        }
         renderLibrary();
       });
       r.appendChild(del);
@@ -4818,31 +5090,37 @@
         validate(data);
         var lib = loadLibrary();
         lib.unshift({
-          id: 'imp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+          id: newId('imp'),
           title: data.title || file.name.replace(/\.json$/i, ''),
           subtitle: data.subtitle || t('libImportedBank', { n: data.questions.length }),
-          date: new Date().toISOString().slice(0, 10),
+          date: todayStr(),
           count: data.questions.length,
           provider: 'import',
           model: '',
           bank: data
         });
-        saveLibrary(lib);
+        if (!saveLibrary(lib)) {
+          var saveErr = new Error(t('errSaveFailed'));
+          saveErr.saveFailed = true;
+          throw saveErr;
+        }
         renderLibrary();
+        /* renderLibrary() rebuilds the header, so the status boxes
+           must be looked up (and filled) after it, not before. A
+           bank import used to give no confirmation at all. */
+        var okBox = document.getElementById('backup-status');
+        showStatusBox(okBox, t('libBankImported', { n: data.questions.length }));
       } catch (e) {
         if (errBox) {
-          errBox.textContent = t('libImportErr', { msg: e.message + t('libImportHint') });
-          errBox.classList.add('show');
+          /* A storage failure is not a format problem — do not
+             append the format hint to it. */
+          showStatusBox(errBox, (e && e.saveFailed)
+            ? e.message
+            : t('libImportErr', { msg: e.message + t('libImportHint') }));
         }
       }
     };
-    reader.onerror = function () {
-      var errBox = document.getElementById('import-error');
-      if (errBox) {
-        errBox.textContent = t('libReadErr');
-        errBox.classList.add('show');
-      }
-    };
+    reader.onerror = function () { showImportReadError(); };
     reader.readAsText(file);
   }
 
@@ -4850,7 +5128,11 @@
     var blob = new Blob([JSON.stringify(entry.bank, null, 2)], { type: 'application/json' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = (entry.title || 'exam').replace(/[^a-z0-9-_]+/gi, '-').toLowerCase() + '.json';
+    /* A non-Latin title (e.g. Arabic) sanitizes to nothing but
+       dashes — fall back to 'exam' instead of a '-.json' file. */
+    var safe = (entry.title || 'exam').replace(/[^a-z0-9-_]+/gi, '-')
+      .replace(/^-+|-+$/g, '').toLowerCase();
+    a.download = (safe || 'exam') + '.json';
     document.body.appendChild(a);
     a.click();
     setTimeout(function () {
@@ -4900,17 +5182,14 @@
     var okBox = document.getElementById('backup-status');
     var lib = loadLibrary();
     if (!lib.length) {
-      if (errBox) {
-        errBox.textContent = t('libBackupEmpty');
-        errBox.classList.add('show');
-      }
-      if (okBox) okBox.classList.remove('show');
+      showStatusBox(errBox, t('libBackupEmpty'));
+      hideStatusBox(okBox);
       return null;
     }
     var data = buildBackup();
     window.__qfLastBackup = data;
-    downloadJson(data, 'quizforge-library-' + new Date().toISOString().slice(0, 10) + '.json');
-    if (errBox) errBox.classList.remove('show');
+    downloadJson(data, 'quizforge-library-' + todayStr() + '.json');
+    hideStatusBox(errBox);
     return data;
   }
 
@@ -4941,6 +5220,12 @@
           ? entry.id : 'imp-lib-' + Date.now() + '-' + i;
         if (seen[id]) { skipped++; return; }
         seen[id] = true;
+        /* A backup round-trip used to drop the material, the stored
+           settings, the variant chain and the source URL — a
+           restored exam could no longer make a variant or chat
+           about its material. Keep them (type-checked, and the
+           settings sanitized) so an export → import keeps the exam
+           fully working. */
         fresh.push({
           id: id,
           title: (typeof entry.title === 'string' && entry.title)
@@ -4948,17 +5233,23 @@
           subtitle: (typeof entry.subtitle === 'string')
             ? entry.subtitle : t('libImportedBank', { n: entry.bank.questions.length }),
           date: (typeof entry.date === 'string' && entry.date)
-            ? entry.date : new Date().toISOString().slice(0, 10),
+            ? entry.date : todayStr(),
           count: entry.bank.questions.length,
           provider: (typeof entry.provider === 'string' && entry.provider) ? entry.provider : 'import',
           model: (typeof entry.model === 'string') ? entry.model : '',
-          bank: entry.bank
+          bank: entry.bank,
+          material: (typeof entry.material === 'string') ? entry.material : '',
+          sourceUrl: (typeof entry.sourceUrl === 'string') ? entry.sourceUrl : '',
+          gen: (entry.gen && typeof entry.gen === 'object') ? sanitizeGenSettings(entry.gen) : undefined,
+          variant: (typeof entry.variant === 'number' && isFinite(entry.variant)) ? entry.variant : 1,
+          baseTitle: (typeof entry.baseTitle === 'string' && entry.baseTitle) ? entry.baseTitle : undefined
         });
         added++;
       } catch (e) { invalid++; }
     });
     if (added === 0 && skipped === 0) throw new Error(t('libBackupNoValid'));
-    if (added > 0) saveLibrary(fresh.concat(lib));
+    if (added > 0 && !saveLibrary(fresh.concat(lib)))
+      throw new Error(t('errSaveFailed'));
     return { added: added, skipped: skipped, invalid: invalid };
   }
 
@@ -4973,29 +5264,17 @@
         renderLibrary();
         errBox = document.getElementById('import-error');
         okBox = document.getElementById('backup-status');
-        if (errBox) errBox.classList.remove('show');
-        if (okBox) {
-          okBox.textContent = t('libBackupImported', { added: res.added, skipped: res.skipped }) +
-            (res.invalid > 0 ? t('libBackupInvalidNote', { n: res.invalid }) : '');
-          okBox.classList.add('show');
-        }
+        hideStatusBox(errBox);
+        showStatusBox(okBox, t('libBackupImported', { added: res.added, skipped: res.skipped }) +
+          (res.invalid > 0 ? t('libBackupInvalidNote', { n: res.invalid }) : ''));
       } catch (e) {
         okBox = document.getElementById('backup-status');
         errBox = document.getElementById('import-error');
-        if (okBox) okBox.classList.remove('show');
-        if (errBox) {
-          errBox.textContent = e.message;
-          errBox.classList.add('show');
-        }
+        hideStatusBox(okBox);
+        showStatusBox(errBox, e.message);
       }
     };
-    reader.onerror = function () {
-      var errBox = document.getElementById('import-error');
-      if (errBox) {
-        errBox.textContent = t('libReadErr');
-        errBox.classList.add('show');
-      }
-    };
+    reader.onerror = function () { showImportReadError(); };
     reader.readAsText(file);
   }
 
@@ -5072,7 +5351,7 @@
         var rights = scrambleRights(q, false);
         var mRight = el('ol', 'print-opts');
         rights.forEach(function (r, idx) {
-          mRight.appendChild(el('li', null, LETTERS[idx] + ') ' + r));
+          mRight.appendChild(el('li', null, letterFor(idx) + ') ' + r));
         });
         item.appendChild(mRight);
       } else if (qt === 'ordering') {
@@ -5089,7 +5368,7 @@
       } else {
         var opts = el('ol', 'print-opts');
         q.options.forEach(function (optText, idx) {
-          opts.appendChild(el('li', null, LETTERS[idx] + ') ' + (qt === 'tf' ? tfDisplayText(optText) : optText)));
+          opts.appendChild(el('li', null, letterFor(idx) + ') ' + (qt === 'tf' ? tfDisplayText(optText) : optText)));
         });
         item.appendChild(opts);
       }
@@ -5123,7 +5402,7 @@
           (q.items || []).map(function (s, idx) { return (idx + 1) + '. ' + s; }).join(' · ')));
       } else {
         row.appendChild(el('div', 'print-keyans',
-          (i + 1) + '. ' + LETTERS[q.answer] + ') ' + (qt === 'tf' ? tfDisplayText(q.options[q.answer]) : q.options[q.answer])));
+          (i + 1) + '. ' + letterFor(q.answer) + ') ' + (qt === 'tf' ? tfDisplayText(q.options[q.answer]) : q.options[q.answer])));
       }
       if (qt === 'tf' && tfJustification(q)) {
         row.appendChild(el('div', 'print-keywhy', t('tfJustification') + tfJustification(q)));
@@ -5187,7 +5466,7 @@
       if (qt === 'mcq' || qt === 'tf') {
         var bubbles = el('div', 'ans-bubbles');
         (q.options || []).forEach(function (_, idx) {
-          bubbles.appendChild(el('span', 'ans-bubble', LETTERS[idx] || String(idx + 1)));
+          bubbles.appendChild(el('span', 'ans-bubble', letterFor(idx)));
         });
         row.appendChild(bubbles);
       } else {
@@ -5207,7 +5486,7 @@
           mWrap.appendChild(mLeft);
           var mRight = el('ol', 'print-opts');
           scrambleRights(q, false).forEach(function (r, idx) {
-            mRight.appendChild(el('li', null, LETTERS[idx] + ') ' + r));
+            mRight.appendChild(el('li', null, letterFor(idx) + ') ' + r));
           });
           mWrap.appendChild(mRight);
           write.appendChild(mWrap);
@@ -5287,7 +5566,7 @@
       var correctText = '';
       if (qt === 'mcq' || qt === 'tf') {
         correctText = correctIdx >= 0 && opts[correctIdx]
-          ? LETTERS[correctIdx] + ') ' + tfDisplayText(opts[correctIdx].text) : '';
+          ? letterFor(correctIdx) + ') ' + tfDisplayText(opts[correctIdx].text) : '';
       } else if (qt === 'fill') {
         correctText = (q.answers || []).join(', ');
       } else if (qt === 'essay') {
@@ -5734,8 +6013,12 @@
       return Promise.reject(new Error('no CompressionStream'));
     var cs = new CompressionStream('deflate');
     var writer = cs.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
+    /* A corrupt stream rejects the write/close promises too — swallow
+       those here so the failure only surfaces once, through the
+       Response promise the caller already handles. Otherwise a bad
+       share link also logs an unhandled-rejection pageerror. */
+    writer.write(bytes).catch(function () {});
+    writer.close().catch(function () {});
     return new Response(cs.readable).arrayBuffer().then(function (buf) {
       return new Uint8Array(buf);
     });
@@ -5744,8 +6027,8 @@
   function inflateBytes(bytes) {
     var ds = new DecompressionStream('deflate');
     var writer = ds.writable.getWriter();
-    writer.write(bytes);
-    writer.close();
+    writer.write(bytes).catch(function () {});
+    writer.close().catch(function () {});
     return new Response(ds.readable).arrayBuffer().then(function (buf) {
       return new Uint8Array(buf);
     });
@@ -5901,16 +6184,19 @@
   function saveSharedExam() {
     var lib = loadLibrary();
     lib.unshift({
-      id: 'shr-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+      id: newId('shr'),
       title: quiz.title || t('quizDefaultTitle'),
       subtitle: quiz.subtitle || t('libImportedBank', { n: quiz.questions.length }),
-      date: new Date().toISOString().slice(0, 10),
+      date: todayStr(),
       count: quiz.questions.length,
       provider: 'shared',
       model: '',
       bank: quiz
     });
-    saveLibrary(lib);
+    if (!saveLibrary(lib)) {
+      showToast(t('errSaveFailed'), true);
+      return;
+    }
     sharedExam = null;
     showStart(t('shareSaved'));
   }
@@ -6009,6 +6295,14 @@
       }
       saveSettings();
       updateSettingsSummary();
+      /* Mid-quiz: rebuild the question screen so the per-question
+         chip appears or disappears at once. Turning it on starts a
+         fresh countdown for the current question; drafts keep any
+         typed answer. */
+      if (run && !run.resultsShown) {
+        if (pq.checked && run.perQLeftByPos) delete run.perQLeftByPos[run.current];
+        renderQuestion();
+      }
     });
     sec.addEventListener('change', function () {
       var v = parseInt(sec.value, 10);
@@ -6017,6 +6311,14 @@
         sec.value = String(settings.perQSeconds);
         saveSettings();
         updateSettingsSummary();
+        /* Mid-quiz: the new value applies to the current question
+           from now, so the chip never shows a stale limit. */
+        if (run && !run.resultsShown && settings.perQTimer &&
+          run.answers[run.current] === null) {
+          run.perQLeft = settings.perQSeconds;
+          var chip = document.getElementById('timer-perq');
+          if (chip) chip.textContent = fmtTime(run.perQLeft);
+        }
       }
     });
 
@@ -6110,6 +6412,10 @@
     if (!run || !run.strict || run.resultsShown) return;
     var pos;
     for (pos = 0; pos < run.qIndexes.length; pos++) {
+      /* Only the question on screen has a live elapsed time; every
+         other unanswered question records 0s, not the current
+         question's clock. */
+      var secsFor = (pos === run.current) ? qSecs() : 0;
       if (run.answers[pos] !== null) {
         var a = run.answers[pos];
         if (a.grading) { a.grading = false; a.graded = false; a.correct = false; a.timedOut = true; }
@@ -6131,14 +6437,14 @@
       }
       if ((qt === 'fill' || qt === 'essay' || qt === 'coding') && txt.trim()) {
         if (qt === 'fill') {
-          run.answers[pos] = { text: txt, oral: !!run.oral, correct: gradeFill(q, txt), timedOut: true, secs: qSecs() };
+          run.answers[pos] = { text: txt, oral: !!run.oral, correct: gradeFill(q, txt), timedOut: true, secs: secsFor };
         } else if (qt === 'coding') {
           run.answers[pos] = {
-            text: txt, oral: !!run.oral, correct: false, timedOut: true, secs: qSecs(),
+            text: txt, oral: !!run.oral, correct: false, timedOut: true, secs: secsFor,
             codeScore: 0, codeTotal: (q.tests || []).length
           };
         } else {
-          run.answers[pos] = { text: txt, oral: !!run.oral, correct: false, graded: false, grading: false, timedOut: true, secs: qSecs() };
+          run.answers[pos] = { text: txt, oral: !!run.oral, correct: false, graded: false, grading: false, timedOut: true, secs: secsFor };
         }
       } else if (run.oral && (qt === 'mcq' || qt === 'tf') && txt.trim()) {
         var op = parseSpokenChoice(q, txt,
@@ -6146,7 +6452,7 @@
         run.answers[pos] = {
           text: txt, oral: true, picked: op,
           correct: op !== null ? run.optOrders[pos][op].correct : false,
-          graded: op !== null, grading: false, timedOut: true, secs: qSecs(),
+          graded: op !== null, grading: false, timedOut: true, secs: secsFor,
           score: op !== null ? (run.optOrders[pos][op].correct ? 100 : 0) : 0,
           maxScore: 100, method: 'local',
           gradeError: op === null ? t('oralNoMatch') : undefined
@@ -6157,14 +6463,14 @@
         var gm = gradeMatching(q, picks);
         run.answers[pos] = {
           picks: picks, correct: gm.correct, got: gm.got, total: gm.total,
-          timedOut: true, secs: qSecs()
+          timedOut: true, secs: secsFor
         };
       } else if (qt === 'ordering') {
         var ord = ((run.orderDrafts[pos] || []).slice());
         var go = gradeOrdering(q, ord);
         run.answers[pos] = {
           order: ord, correct: go.correct, got: go.got, total: go.total,
-          timedOut: true, secs: qSecs()
+          timedOut: true, secs: secsFor
         };
       } else {
         run.answers[pos] = { picked: null, text: txt || '', correct: false, timedOut: true, secs: 0 };
@@ -6185,9 +6491,14 @@
     }, 1000);
   }
 
-  function startPerQTimer() {
+  /* Start (or resume) the per-question countdown. `left` resumes a
+     saved remainder — going back to a question, or a failed oral
+     submit, must not hand the student a fresh full timer. Without
+     it the question starts with the full per-question time. */
+  function startPerQTimer(left) {
     if (perQTimerId !== null) clearInterval(perQTimerId);
-    run.perQLeft = settings.perQSeconds;
+    run.perQLeft = (typeof left === 'number' && left >= 0)
+      ? Math.min(left, settings.perQSeconds) : settings.perQSeconds;
     var chip = document.getElementById('timer-perq');
     if (chip) {
       chip.textContent = fmtTime(run.perQLeft);
@@ -6234,6 +6545,8 @@
   }
 
   function showStart(note) {
+    /* An intentional exit (Exit button) is not a fullscreen escape. */
+    if (run && run.strict) strictWarned = true;
     if (run && run.strict) exitFullscreen();
     stopTimers();
     stopSpeech();
@@ -6447,7 +6760,7 @@
          language, like the quiz screen shows them. */
       if (qt === 'tf') texts = texts.map(function (x) { return tfDisplayText(x); });
       texts.forEach(function (text, i) {
-        parts.push((LETTERS[i] || '') + '. ' + text);
+        parts.push(letterFor(i) + '. ' + text);
       });
     } else if (qt === 'matching') {
       (q.pairs || []).forEach(function (p) { parts.push(p.left); });
@@ -6633,7 +6946,8 @@
   /* Plain words for one spoken transcript. Returns the display
      index of the option it names, or null when it names none.
      Understands: the option letter (A–F, or Arabic أ ب ج د هـ و),
-     the option number (1–6), ordinals (first/second…, الأول/الثاني…),
+     the option number (any number up to the option count), ordinals
+     (first/second…/twelfth, الأول/الثاني…/الثاني عشر),
      the words True/False (صح/خطأ، نعم/لا) for True/False, and the
      option text itself (spoken exactly, or containing it). Matching
      is against the DISPLAY order (run.optOrders), so it agrees with
@@ -6669,37 +6983,45 @@
       }
     }
     /* A bare letter or number: "B", "option B", "letter C", "2",
-       "the second one", "الأول", "ب". */
+       "option 7", "12", "the second one", "the twelfth one",
+       "الأول", "السابع", "ب". Letters only run A–F (the UI shows a
+       number, not a letter, past F), but numbers and ordinals work
+       up to the option count, so a 7+-option imported question can
+       still be answered by voice. */
     var letters = ['a', 'b', 'c', 'd', 'e', 'f'];
     var arLetters = ['أ', 'ب', 'ج', 'د', 'ه', 'و'];
     var ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth',
-      'الأول', 'الاول', 'الثاني', 'التاني', 'الثالث', 'التالت',
-      'الرابع', 'الخامس', 'السادس'];
-    var m = raw.match(/(?:option|letter|choice|الخيار|الحرف|رقم)\s*([a-f1-6])/);
+      'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth',
+      'الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس',
+      'السابع', 'الثامن', 'التاسع', 'العاشر', 'الحادي عشر', 'الثاني عشر',
+      'الاول', 'التاني', 'التالت', 'الرابع', 'الخامس', 'السادس',
+      'السابع', 'التامن', 'التاسع', 'العاشر', 'الحداشر', 'الاتناشر'];
+    var m = raw.match(/(?:option|letter|choice|الخيار|الحرف|رقم)\s*([a-z]|\d+)/);
     var tok = m ? m[1] : raw;
-    if (tok.length === 1) {
+    if (/^\d+$/.test(tok)) {
+      var ni = parseInt(tok, 10);
+      if (ni >= 1 && ni <= opts.length) return ni - 1;
+    } else if (tok.length === 1) {
       var li = letters.indexOf(tok);
       if (li !== -1 && li < opts.length) return li;
       var ai = arLetters.indexOf(tok);
       if (ai !== -1 && ai < opts.length) return ai;
-      var ni = parseInt(tok, 10);
-      if (!isNaN(ni) && ni >= 1 && ni <= opts.length) return ni - 1;
     }
     var oi = ordinals.indexOf(raw);
     if (oi !== -1) {
-      var idx = oi % 6;
+      var idx = oi % 12;
       if (idx < opts.length) return idx;
     }
     /* Ordinals / number words inside a sentence: "the second one",
        "answer number two", "الخيار التاني". Each word list is
        grouped in sixes, so the index is the position in its group. */
     var numGroups = [
-      ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'],
-      ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس'],
-      ['الاول', 'التاني', 'التالت', 'الرابع', 'الخامس', 'السادس'],
-      ['one', 'two', 'three', 'four', 'five', 'six'],
-      ['واحد', 'اتنين', 'تلاتة', 'اربعة', 'خمسة', 'ستة'],
-      ['واحد', 'اثنين', 'ثلاثة', 'أربعة', 'خمسة', 'ستة']
+      ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth', 'eleventh', 'twelfth'],
+      ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس', 'السابع', 'الثامن', 'التاسع', 'العاشر', 'الحادي عشر', 'الثاني عشر'],
+      ['الاول', 'التاني', 'التالت', 'الرابع', 'الخامس', 'السادس', 'السابع', 'التامن', 'التاسع', 'العاشر', 'الحداشر', 'الاتناشر'],
+      ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'],
+      ['واحد', 'اتنين', 'تلاتة', 'اربعة', 'خمسة', 'ستة', 'سبعة', 'تمانية', 'تسعة', 'عشرة', 'حداشر', 'اتناشر'],
+      ['واحد', 'اثنين', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة', 'عشرة', 'أحد عشر', 'اثنا عشر']
     ];
     for (var g = 0; g < numGroups.length; g++) {
       for (var k = 0; k < numGroups[g].length; k++) {
@@ -6765,12 +7087,15 @@
       if (picked !== null) {
         var correctOpt = run ? run.optOrders[run.current][picked].correct
           : (picked === q.answer);
-        var letter = LETTERS[picked] || '';
+        var letter = letterFor(picked);
         return Promise.resolve({
           score: correctOpt ? 100 : 0, maxScore: 100,
           correct: !!correctOpt, method: 'local', picked: picked,
           feedback: correctOpt ? t('quizCorrect')
-            : t('quizNotQuite', { letter: LETTERS[(run ? run.optOrders[run.current] : []).findIndex(function (o) { return o.correct; })] || letter })
+            /* No active run (or no correct flag found): the correct
+               letter comes from the question's own answer — never
+               from the picked option, which is the wrong one. */
+            : t('quizNotQuite', { letter: letterFor((run ? run.optOrders[run.current] : []).findIndex(function (o) { return o.correct; })) || letterFor(q.answer) })
         });
       }
     }
@@ -6963,9 +7288,9 @@
       if (ta) ta.focus();
       return;
     }
+    var savedOralLeft = run.perQLeft;
     if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
     var secs = qSecs();
-    run.qShownAt = null;
     if (!run.oralDrafts) run.oralDrafts = {};
     run.oralDrafts[pos] = text;
     /* MCQ/TF, no local match, no key: nothing honest can be said
@@ -6976,11 +7301,15 @@
       if (parseSpokenChoice(q, text, displayOpts) === null) {
         showToast(t('oralNoMatch'));
         if (ta) ta.focus();
-        if (perQTimerId === null && settings.perQTimer) startPerQTimer();
-        run.qShownAt = Date.now();
+        /* Back to the transcript with the time that was left, not a
+           fresh full timer — and the elapsed time keeps counting
+           from when the question was first shown. */
+        if (perQTimerId === null && settings.perQTimer) startPerQTimer(savedOralLeft);
+        if (!run.qShownAt) run.qShownAt = Date.now();
         return;
       }
     }
+    run.qShownAt = null;
     run.answers[pos] = {
       text: text, oral: true, correct: null, graded: false, grading: true,
       timedOut: false, secs: secs
@@ -6988,7 +7317,9 @@
     renderQuestion();
     gradeOral(q, text).then(function (res) {
       var a = run && run.answers[pos];
-      if (!a || a.text !== text) return;
+      /* A late grade never overwrites an answer the clock already
+         closed (strict auto-submit) or results already shown. */
+      if (!run || run.resultsShown || !a || a.text !== text || !a.grading) return;
       a.grading = false;
       a.graded = true;
       a.score = res.score;
@@ -6997,20 +7328,18 @@
       a.method = res.method;
       a.correct = res.correct;
       if (typeof res.picked === 'number') a.picked = res.picked;
-      if (run.isReview) {
-        var rr = recordReviewAnswer(quiz, q, a.correct);
-        run.reviewLast = rr;
-        if (rr.mastered) run.reviewMastered++;
-      }
+      applyReviewResult(q, a.correct);
       renderQuestion();
       var nx = document.getElementById('next-btn');
       if (nx) nx.focus();
     }).catch(function (e) {
       var a = run && run.answers[pos];
-      if (!a || a.text !== text) return;
+      if (!run || run.resultsShown || !a || a.text !== text || !a.grading) return;
       a.grading = false;
       a.graded = false;
       a.correct = false;
+      /* Ungraded, not wrong: the review streak is left alone. */
+      applyReviewResult(q, null);
       a.gradeError = (e && e.message === '__NOKEY__')
         ? t('oralNoKey')
         : t('oralGradeFail', { detail: plainError(e) });
@@ -7050,6 +7379,7 @@
           return selectedTopic === 'All' || (quiz.questions[i].topic || 'General') === selectedTopic;
         });
     }
+    if (!indexes.length) return false;
     if (settings.shuffle && !(opts && opts.isReview)) indexes = shuffle(indexes);
 
     var optOrders = indexes.map(function (qi) {
@@ -7103,7 +7433,9 @@
       reviewTotal: (opts && opts.isReview) ? indexes.length : 0,
       reviewBank: (opts && opts.isReview) ? quiz : null,
       codeDrafts: {},    // coding: typed code per position (survives re-renders)
-      codeResults: {}    // coding: last runCodeTests() result per position
+      codeResults: {},   // coding: last runCodeTests() result per position
+      freeDrafts: {},    // essay/fill: typed text per position (survives re-renders)
+      perQLeftByPos: {}  // per-question seconds left per position (survives back/forward)
     };
     if (run.strict) {
       run.strictTotal = strictTotalFor(indexes.length);
@@ -7235,7 +7567,7 @@
         var olist = el('div', 'opts');
         run.optOrders[pos].forEach(function (opt, idx) {
           var row = el('div', 'opt opt-static');
-          row.appendChild(el('span', 'letter', LETTERS[idx]));
+          row.appendChild(el('span', 'letter', letterFor(idx)));
           var otxt = el('span', 'opt-text');
           otxt.textContent = qt === 'tf' ? tfDisplayText(opt.text) : opt.text;
           row.appendChild(otxt);
@@ -7248,7 +7580,7 @@
         run.optOrders[pos].forEach(function (opt, idx) {
           var btn = el('button', 'opt');
           btn.type = 'button';
-          btn.appendChild(el('span', 'letter', LETTERS[idx]));
+          btn.appendChild(el('span', 'letter', letterFor(idx)));
           var txt = el('span', 'opt-text');
           /* True/False labels are UI chrome, not content: show them
              in the UI language (صح/خطأ in Arabic). */
@@ -7458,6 +7790,11 @@
           input.className = 'input fill-input';
         }
         input.id = 'free-answer-input';
+        input.value = (run.freeDrafts && run.freeDrafts[pos]) || '';
+        input.addEventListener('input', function () {
+          if (!run.freeDrafts) run.freeDrafts = {};
+          run.freeDrafts[pos] = input.value;
+        });
         input.placeholder = t(qt === 'essay' ? 'essayPh' : 'fillPh');
         input.setAttribute('aria-label', t(qt === 'essay' ? 'essayPh' : 'fillPh'));
         if (qt === 'fill') {
@@ -7568,13 +7905,13 @@
            after answering. */
         if (state.timedOut) {
           ex.appendChild(el('div', 'verdict timeout', t('quizTimeout', {
-            letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+            letter: letterFor(run.optOrders[pos].findIndex(function (o) { return o.correct; }))
           })));
         } else {
           ex.appendChild(el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
             state.correct ? t('quizCorrect')
               : t('quizNotQuite', {
-                letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+                letter: letterFor(run.optOrders[pos].findIndex(function (o) { return o.correct; }))
               })));
         }
         var just = tfJustification(q);
@@ -7586,13 +7923,13 @@
         }
       } else if (state.timedOut) {
         ex.appendChild(el('div', 'verdict timeout', t('quizTimeout', {
-          letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+          letter: letterFor(run.optOrders[pos].findIndex(function (o) { return o.correct; }))
         })));
       } else {
         ex.appendChild(el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
           state.correct ? t('quizCorrect')
             : t('quizNotQuite', {
-              letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+              letter: letterFor(run.optOrders[pos].findIndex(function (o) { return o.correct; }))
             })));
       }
       /* The generic explanation — skipped for True/False when the
@@ -7622,16 +7959,33 @@
       card.appendChild(sl);
     }
     app.appendChild(card);
+    if (!ttsSupported()) {
+      app.appendChild(el('div', 'hint', t('ttsNoSupport')));
+    }
 
+    var navRow = el('div', 'btnrow quiz-nav-row');
+    if (pos > 0 && !run.strict) {
+      var prev = el('button', 'btn btn-secondary', t('quizPrev'));
+      prev.id = 'prev-btn';
+      prev.type = 'button';
+      prev.disabled = !!(state && state.grading);
+      prev.addEventListener('click', function () { prev.blur(); prevQuestion(); });
+      navRow.appendChild(prev);
+    }
     if (state && !state.grading) {
-      var row = el('div', 'btnrow');
       var last = pos === run.qIndexes.length - 1;
       var next = el('button', 'btn btn-primary btn-big', last ? t('quizResultsBtn') : t('quizNext'));
       next.id = 'next-btn';
       next.addEventListener('click', function () { next.blur(); nextQuestion(); });
-      row.appendChild(next);
-      app.appendChild(row);
-    } else if (!state) {
+      navRow.appendChild(next);
+    }
+    var exit = el('button', 'btn btn-secondary', t('quizExit'));
+    exit.id = 'exit-quiz-btn';
+    exit.type = 'button';
+    exit.addEventListener('click', function () { exit.blur(); exitQuiz(); });
+    navRow.appendChild(exit);
+    app.appendChild(navRow);
+    if (!state) {
       if (run.strict) app.appendChild(el('div', 'hint', t('strictForwardHint')));
       if (run.oral) {
         app.appendChild(el('div', 'hint', t('oralSpeakHint')));
@@ -7644,7 +7998,8 @@
       }
     }
 
-    if (!state && settings.perQTimer) startPerQTimer();
+    if (!state && settings.perQTimer)
+      startPerQTimer(run.perQLeftByPos ? run.perQLeftByPos[pos] : undefined);
 
     /* Auto-read: read the question aloud when it first appears —
        once per position, so a re-render (submit, language switch,
@@ -7668,7 +8023,8 @@
     var q = quiz.questions[run.qIndexes[pos]];
     var qt = qType(q);
     var input = document.getElementById('free-answer-input');
-    var text = input ? input.value.trim() : '';
+    var text = input ? input.value.trim()
+      : ((run.freeDrafts && run.freeDrafts[pos]) || '').trim();
     if (!text) {
       showToast(t(qt === 'essay' ? 'essayEmpty' : 'fillEmpty'));
       if (input) input.focus();
@@ -7680,11 +8036,7 @@
     if (qt === 'fill') {
       var correct = gradeFill(q, text);
       run.answers[pos] = { text: text, correct: correct, timedOut: false, secs: secs };
-      if (run.isReview) {
-        var r = recordReviewAnswer(quiz, q, correct);
-        run.reviewLast = r;
-        if (r.mastered) run.reviewMastered++;
-      }
+      applyReviewResult(q, correct);
       renderQuestion();
       var next = document.getElementById('next-btn');
       if (next) next.focus();
@@ -7697,27 +8049,27 @@
     renderQuestion();
     gradeEssay(q, text).then(function (res) {
       var a = run && run.answers[pos];
-      if (!a || a.text !== text) return;
+      /* A late grade never overwrites an answer the clock already
+         closed (strict auto-submit) or results already shown. */
+      if (!run || run.resultsShown || !a || a.text !== text || !a.grading) return;
       a.grading = false;
       a.graded = true;
       a.score = res.score;
       a.maxScore = res.maxScore;
       a.feedback = res.feedback;
       a.correct = essayPass(res.score, res.maxScore);
-      if (run.isReview) {
-        var rr = recordReviewAnswer(quiz, q, a.correct);
-        run.reviewLast = rr;
-        if (rr.mastered) run.reviewMastered++;
-      }
+      applyReviewResult(q, a.correct);
       renderQuestion();
       var nx = document.getElementById('next-btn');
       if (nx) nx.focus();
     }).catch(function (e) {
       var a = run && run.answers[pos];
-      if (!a || a.text !== text) return;
+      if (!run || run.resultsShown || !a || a.text !== text || !a.grading) return;
       a.grading = false;
       a.graded = false;
       a.correct = false;
+      /* Ungraded, not wrong: the review streak is left alone. */
+      applyReviewResult(q, null);
       a.gradeError = (e && e.message === '__NOKEY__')
         ? t('essayNoKey')
         : t('essayGradeFail', { detail: plainError(e) });
@@ -7786,11 +8138,7 @@
       picks: picks, correct: g.correct, got: g.got, total: g.total,
       timedOut: false, secs: secs
     };
-    if (run.isReview) {
-      var r = recordReviewAnswer(quiz, q, g.correct);
-      run.reviewLast = r;
-      if (r.mastered) run.reviewMastered++;
-    }
+    applyReviewResult(q, g.correct);
     renderQuestion();
     var next = document.getElementById('next-btn');
     if (next) next.focus();
@@ -7811,11 +8159,7 @@
       order: order, correct: g.correct, got: g.got, total: g.total,
       timedOut: false, secs: secs
     };
-    if (run.isReview) {
-      var r = recordReviewAnswer(quiz, q, g.correct);
-      run.reviewLast = r;
-      if (r.mastered) run.reviewMastered++;
-    }
+    applyReviewResult(q, g.correct);
     renderQuestion();
     var next = document.getElementById('next-btn');
     if (next) next.focus();
@@ -7905,17 +8249,17 @@
     var runBtn = document.getElementById('code-run-btn');
     if (runBtn) runBtn.disabled = true;
     function finish(result) {
+      /* A late test run never overwrites an answer the clock already
+         closed (strict auto-submit) or results already shown. */
+      if (!run || run.resultsShown) return;
+      if (run.answers[pos] !== null && run.answers[pos].timedOut) return;
       var correct = result.total > 0 && result.passed === result.total && !result.timedOut;
       run.answers[pos] = {
         text: code, correct: correct, timedOut: !!result.timedOut,
         secs: secs, results: result,
         codeScore: result.passed, codeTotal: result.total
       };
-      if (run.isReview) {
-        var r = recordReviewAnswer(quiz, q, correct);
-        run.reviewLast = r;
-        if (r.mastered) run.reviewMastered++;
-      }
+      applyReviewResult(q, correct);
       renderQuestion();
       var next = document.getElementById('next-btn');
       if (next) next.focus();
@@ -7940,11 +8284,7 @@
     var correct = run.optOrders[pos][displayIdx].correct;
     run.answers[pos] = { picked: displayIdx, correct: correct, timedOut: false, secs: qSecs() };
     run.qShownAt = null;
-    if (run.isReview) {
-      var r = recordReviewAnswer(quiz, quiz.questions[run.qIndexes[pos]], correct);
-      run.reviewLast = r;
-      if (r.mastered) run.reviewMastered++;
-    }
+    applyReviewResult(quiz.questions[run.qIndexes[pos]], correct);
     renderQuestion();
     var next = document.getElementById('next-btn');
     if (next) next.focus();
@@ -7958,6 +8298,8 @@
     if (qt === 'essay' || qt === 'fill' || qt === 'coding') {
       var inp = document.getElementById(qt === 'coding' ? 'code-editor' : 'free-answer-input');
       if (inp) txt = inp.value.trim();
+      else if (qt === 'coding') txt = ((run.codeDrafts && run.codeDrafts[run.current]) || '').trim();
+      else txt = ((run.freeDrafts && run.freeDrafts[run.current]) || '').trim();
     }
     if (run.oral) {
       /* Oral mode: keep whatever was spoken or typed so far. A
@@ -7993,7 +8335,7 @@
         if (oans) {
           stopOralRecognition();
           run.answers[run.current] = oans;
-          if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, oans.correct);
+          applyReviewResult(q, oans.correct);
           run.qShownAt = null;
           renderQuestion();
           var onx = document.getElementById('next-btn');
@@ -8005,7 +8347,7 @@
     if (qt === 'fill' && txt) {
       var fc = gradeFill(q, txt);
       run.answers[run.current] = { text: txt, correct: fc, timedOut: true, secs: qSecs() };
-      if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, fc);
+      applyReviewResult(q, fc);
     } else if (qt === 'matching') {
       /* Time ran out: keep whatever pairs were picked, unpicked
          items count as wrong. */
@@ -8015,7 +8357,7 @@
         picks: picks, correct: gm.correct, got: gm.got, total: gm.total,
         timedOut: true, secs: qSecs()
       };
-      if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, gm.correct);
+      applyReviewResult(q, gm.correct);
     } else if (qt === 'ordering') {
       /* Time ran out: keep the order as it stands. */
       var ord = ((run.orderDrafts[run.current] || []).slice());
@@ -8024,7 +8366,7 @@
         order: ord, correct: go.correct, got: go.got, total: go.total,
         timedOut: true, secs: qSecs()
       };
-      if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, go.correct);
+      applyReviewResult(q, go.correct);
     } else if (qt === 'coding') {
       /* Time ran out: keep the typed code, mark it wrong for this
          attempt, do not run the tests (time is up). */
@@ -8032,7 +8374,7 @@
         text: txt, correct: false, timedOut: true, secs: qSecs(),
         codeScore: 0, codeTotal: (q.tests || []).length
       };
-      if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, false);
+      applyReviewResult(q, false);
     } else if (qt === 'essay' && txt) {
       /* Time ran out with text typed: keep the text, mark it wrong
          for this attempt, do not grade it (time is up). */
@@ -8040,12 +8382,10 @@
         text: txt, correct: false, graded: false, grading: false,
         timedOut: true, secs: qSecs()
       };
-      if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, false);
+      applyReviewResult(q, false);
     } else {
       run.answers[run.current] = { picked: null, correct: false, timedOut: true, secs: qSecs() };
-      if (run.isReview) {
-        run.reviewLast = recordReviewAnswer(quiz, q, false);
-      }
+      applyReviewResult(q, false);
     }
     run.qShownAt = null;
     renderQuestion();
@@ -8054,8 +8394,13 @@
   }
 
   function nextQuestion() {
+    /* The Next button hides while an answer is grading, but the
+       keyboard could still advance: never leave a grading answer
+       behind — its callback would re-render the wrong question. */
+    if (run.answers[run.current] && run.answers[run.current].grading) return;
     stopSpeech();
     stopOralRecognition();
+    savePerQLeft();
     if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
     if (run.current < run.qIndexes.length - 1) {
       run.current++;
@@ -8063,6 +8408,41 @@
     } else {
       showResults();
     }
+  }
+
+  /* Remember how much per-question time is left on the current
+     question, so coming back to it resumes instead of resetting. */
+  function savePerQLeft() {
+    if (run && settings.perQTimer && run.answers[run.current] === null) {
+      if (!run.perQLeftByPos) run.perQLeftByPos = {};
+      run.perQLeftByPos[run.current] = run.perQLeft;
+    }
+  }
+
+  /* Go back one question (never in strict mode, never while the
+     current answer is still grading). Answered questions show their
+     explanation again; an unanswered one resumes with the time it
+     had left. */
+  function prevQuestion() {
+    if (!run || run.strict || run.current <= 0) return;
+    if (run.answers[run.current] && run.answers[run.current].grading) return;
+    stopSpeech();
+    stopOralRecognition();
+    savePerQLeft();
+    if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
+    run.current--;
+    renderQuestion();
+  }
+
+  /* Leave the quiz mid-attempt, with a confirm: the attempt and its
+     answers are discarded and the exam start screen returns. */
+  function exitQuiz() {
+    if (!run) return;
+    if (!window.confirm(t('quizExitConfirm'))) return;
+    stopTimers();
+    stopSpeech();
+    stopOralRecognition();
+    showStart();
   }
 
   /* ---------- quiz engine: results ---------- */
@@ -8185,6 +8565,11 @@
       if (qt === 'tf' && yours !== null) yours = tfDisplayText(yours);
       var correctText = (correctIdx >= 0 && opts[correctIdx]) ? opts[correctIdx].text : '';
       if (qt === 'tf') correctText = tfDisplayText(correctText);
+      /* Letter + text of the correct option; with no correct option
+         found (a corrupt bank) the label is just the text, never
+         "undefined) ...". letterFor handles 7+ options (it falls
+         back to the 1-based number). */
+      var correctLabel = correctIdx >= 0 ? letterFor(correctIdx) + ') ' + correctText : correctText;
       var line = el('div', 'ra');
       if (a && a.oral) {
         /* Spoken answer: the transcript is the answer, plus the
@@ -8207,7 +8592,7 @@
         if ((qt === 'mcq' || qt === 'tf') && !(a && a.correct)) {
           var oc = el('div', 'ra');
           oc.appendChild(document.createTextNode(t('resCorrectIs')));
-          oc.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + correctText));
+          oc.appendChild(el('span', 'right', correctLabel));
           item.appendChild(oc);
         }
       } else if (qt === 'essay') {
@@ -8296,13 +8681,13 @@
         line.appendChild(document.createTextNode(t('resYourAnswer')));
         line.appendChild(el('span', 'yours', t('resNoAnswerTimeout')));
         line.appendChild(document.createTextNode(t('resCorrectIs')));
-        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + correctText));
+        line.appendChild(el('span', 'right', correctLabel));
         item.appendChild(line);
       } else {
         line.appendChild(document.createTextNode(t('resYourAnswer')));
         line.appendChild(el('span', 'yours', '✗ ' + (yours !== null ? yours : t('resNoAnswer'))));
         line.appendChild(document.createTextNode(t('resCorrectIs')));
-        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + correctText));
+        line.appendChild(el('span', 'right', correctLabel));
         item.appendChild(line);
       }
       /* True/False justification, prominently — the point of the
@@ -8444,6 +8829,16 @@
     } else if (state && e.key === 'Enter') {
       e.preventDefault();
       nextQuestion();
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      /* ← → move between questions (RTL-aware, like flashcards).
+         Forward needs an answered question; back never runs in
+         strict mode — prevQuestion enforces both, plus the grading
+         guard. */
+      var rtl = document.documentElement.dir === 'rtl';
+      var forward = (e.key === 'ArrowRight') !== rtl;
+      e.preventDefault();
+      if (forward) { if (state && !state.grading) nextQuestion(); }
+      else prevQuestion();
     }
   });
 

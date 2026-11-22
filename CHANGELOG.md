@@ -4,6 +4,94 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — Phase 2: harden + organize all features
+
+- **A full hardening pass over every feature, in five parts, with no
+  feature removed and no visible behaviour changed except where a bug
+  was fixed.** Each part was verified in headless Chrome against a
+  local mock provider only (never a live provider, never a real key),
+  in English + Arabic, dark mode, and at 390px, with zero console
+  errors.
+- **Core / generation + library (28 checks)** — a chunk that fails
+  mid-generation no longer throws away the earlier chunks: the
+  questions that did arrive are saved as a partial exam and the
+  failure is still shown plainly. Every caller now checks the
+  true/false result of saveLibrary(), so a storage failure is
+  reported instead of silently pretending the save worked. The
+  connection test now validates the reply: a JSON reply must actually
+  be the `{"ok": true}` asked for — any other JSON is rejected — while
+  a plain-text reply still counts as connected. A scanned / no-text
+  PDF and a non-UTF-8 text file both show a plain error or warning
+  instead of adding garbled or empty material. Stored generation
+  settings are sanitized (count clamped 5–50, difficulty/language
+  from the known lists, types per-field) so a corrupt stored `gen`
+  can never crash the prompt build. A backup export → import now
+  keeps the material, the stored settings, the variant chain
+  (variant number + base title) and the source URL, so a restored
+  exam can still make a variant and chat about its material. Shared
+  helpers added: lsGetJSON / lsSetJSON, loadScriptOnce,
+  postProviderJson.
+- **Quiz engine + smart review (24 checks)** — Previous button and
+  RTL-correct arrow keys; an Exit button with a confirm guard so a
+  mid-quiz exit never silently throws the attempt away; the
+  per-question countdown resumes with its remaining time after a
+  language switch; essay/fill drafts survive moving back and forth;
+  Enter is blocked while grading; async grading has race guards so a
+  late reply cannot overwrite a newer answer; smart review uses one
+  shared applyReviewResult helper; flashcards restore their original
+  order when shuffle is turned off and answer to arrow keys.
+- **Sharing / export / offline (37 checks)** — the summary screen
+  now always shows the summary of the exam actually being started,
+  never the wizard's leftover one. The 7+-option "undefined" bug is
+  fixed with one shared letterFor() helper (letters A–F, then the
+  1-based number). Corrupt share links are rejected with a plain
+  message instead of loading a broken exam. Translation restores the
+  original exam cleanly and no longer leaves stale state behind.
+  Language detection now counts rubric, matching pairs and ordering
+  items, not just question text. Service worker cache bumped v1 → v2.
+- **Newer features: chat, past-exam analysis, oral exam, variant
+  (44 checks)** — the 7+-option letters bug is fixed everywhere it
+  appeared (quiz, results, review, flashcards, read-aloud, oral
+  exam), not just in print. Chat no longer silently drops the exam's
+  own material when a file is added — uploads extend it. Past-exam
+  analysis no longer writes hardcoded English focus lines and no
+  longer drops its state when the screen is reopened. Oral grading
+  no longer falls back to a wrong letter. Variant dedupe now covers
+  every saved version sharing the exam's base title, so a variant of
+  a variant cannot resurrect an earlier version's questions.
+  A variant finishing while the student is on another view no longer
+  yanks them back to the library. Five i18n keys added — parity is
+  now 609 English == 609 Arabic. Service worker cache bumped v2 → v3.
+- **Organization (this pass)** — the file's existing section comments
+  are now joined by a table of contents at the top of app.js, so the
+  ~9,000-line file can be navigated at a glance. Clearly-repeated
+  code is deduped into shared helpers with identical behaviour:
+  showStatusBox / hideStatusBox for the status lines
+  (#backup-status, #import-error, #gen-success), one
+  showImportReadError for both file imports, todayStr() for the
+  library date stamp, newId(prefix) for entry ids. i18n.js was
+  verified key by key: 609 keys in English and 609 in Arabic, no
+  missing keys, no dead keys (every key is used — including the
+  `keyLabel.*` keys reached through the provider name and the keys
+  used through lookup maps and `data-i18n-title` attributes). Service
+  worker cache bumped v3 → v4 for the changed shell.
+- **One bug left over from the variant work, fixed here** — when a
+  variant generation failed while the student was off the library
+  view, the error fell back to #backup-status, which only exists on
+  the library, so the failure was silently dropped (the button just
+  reset). It now falls back to a sticky toast that is always in the
+  DOM, so the failure is always seen; nothing is saved wrongly.
+  Verified by a dedicated check (variant fails off-library → toast
+  shown, library unchanged; variant succeeds on-library → status
+  line shown, no toast).
+- Verified with a headless-Chrome full regression — 120 checks
+  passed, 0 failed: rebuilt core suite 15/15 (generation incl.
+  partial-chunk failure, library/backup round-trip, i18n parity,
+  connection test, blank PDF, non-UTF8, settings sanitization),
+  quiz engine + review 24/24, sharing/export/offline 37/37, newer
+  features 44/44. A real provider call was NOT verified — all tests
+  used a local mock endpoint only.
+
 ## 2026-11-22 — Cheat sheet from mistakes (ورقة غش من الأخطاء)
 
 - **"📄 Cheat sheet from your mistakes" on the results screen** — shown
