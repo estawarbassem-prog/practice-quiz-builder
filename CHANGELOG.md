@@ -4,6 +4,54 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — Upload Word (.docx) and PowerPoint (.pptx) as material
+
+- **Word and PowerPoint join the dropzone** — step 1 now accepts
+  `.docx` and `.pptx` files (picker + drag-and-drop, alongside PDF,
+  text and JSON banks). Multiple files still merge into one material,
+  and the file list shows each file with its size, character count —
+  and the slide count for presentations ("Slides: 3") — in the
+  material summary too.
+- **What is read, honestly** — both formats are ZIP archives of XML,
+  so the reader is JSZip 3.10.1 from cdnjs, loaded lazily only when
+  the first Word or PowerPoint file is added (same pattern as pdf.js
+  and SheetJS). Word gives the document body — paragraphs and tables,
+  in order, with tracked deleted text skipped; PowerPoint gives the
+  text of every slide, in slide-number order (slide 10 after slide 2,
+  not after slide 1). Images are not read (no OCR), and neither are
+  speaker notes or Word headers/footers.
+- **Clear errors, nothing half-added** — a file that is not a real
+  Word/PowerPoint file, a presentation with no slides, or a file with
+  no readable text shows a plain message and adds nothing; if the
+  JSZip CDN cannot be reached, the message says to check the
+  connection or paste the text instead. A failed upload never wipes
+  or replaces the material already there.
+- **Two small fixes folded in** — switching the UI language on step 1
+  used to show an empty file list even though the material was still
+  there (the list refreshed while the new card was still detached);
+  the wizard now refreshes the list once attached, so uploaded files
+  survive a language switch. And a failed Office upload's message
+  used to be wiped by the next list refresh; it is now kept on the
+  material state until the next successful upload, like the PDF
+  failure note.
+- 7 new i18n keys (English + Arabic); works in both languages and in
+  dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against real .docx /
+  .pptx files and a local mock provider — 61 checks passed (55 in
+  the main run + 6 in the no-CDN run): lazy JSZip load, split runs
+  joined, table text and Arabic lines extracted, tracked-deleted
+  text excluded, slide order 1 → 2 → 10, corrupt / empty / no-slides
+  files refused with a clear message and nothing added, file removal
+  and re-add, Arabic UI (RTL, "شرائح: 3"), full generation from the
+  uploaded material with the docx + pptx text in the provider prompt
+  in the right order, generated exam taken end to end (2/2, 100%),
+  saved to the library, dark mode, 390px with no overflow, CDN
+  blocked → clear connection message and no file added, zero console
+  errors. (This VM's headless browser has no direct internet, so the
+  JSZip CDN request was fulfilled by the harness with the exact
+  cdnjs 3.10.1 bytes; the app still loads it through a `<script>`
+  tag exactly as in production.)
+
 ## 2026-11-21 — Read questions aloud (text-to-speech)
 
 - **🔊 Listen button on every question** — the quiz screen, each

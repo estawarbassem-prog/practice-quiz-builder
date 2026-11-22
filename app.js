@@ -36,6 +36,10 @@
   /* SheetJS (xlsx) loads LAZILY, only when an .xlsx file is added —
      same pattern as pdf.js above. CSV paste/upload never needs it. */
   var XLSX_URL = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  /* JSZip (docx/pptx) loads LAZILY, only when a Word or PowerPoint
+     file is added — same pattern as pdf.js / SheetJS above. Both are
+     ZIP archives of XML, so no heavier reader is needed. */
+  var JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
   var CHUNK_CHARS = 12000;
 
   var settings = loadSettings();   // { shuffle, perQTimer, perQSeconds, autoRead, speechRate }
@@ -110,8 +114,8 @@
 
   /* ---------- wizard state ---------- */
   var wiz = loadWizard();   // { step, title, count, types:{mcq,tf}, difficulty, language, focus, perQTimer }
-  var material = { files: [], pasted: '', text: '', pdfPages: 0, pdfFailed: false };
-  // material.files: [{name, size, kind: 'pdf'|'text'|'bank', chars, pages?}]
+  var material = { files: [], pasted: '', text: '', pdfPages: 0, pptxSlides: 0, pdfFailed: false, readError: '' };
+  // material.files: [{name, size, kind: 'pdf'|'text'|'bank'|'docx'|'pptx', chars, pages?}]
   var byok = loadByok();    // {provider, apiKey, model, baseUrl, proxyUrl}
   var genState = { busy: false, error: '', progress: '', lastBank: null };
 
@@ -1029,6 +1033,13 @@
 
     app.appendChild(wrap);
     updateLibCount();
+    /* refreshFileList() also runs inside renderStepUpload, but there
+       the new card is still detached, so getElementById finds nothing
+       and the file list stays empty after a re-render (e.g. a language
+       switch) even though the material is still there — refresh once
+       the wizard is attached. Harmless on other steps: the elements
+       do not exist and refreshFileList returns early. */
+    if (wiz.step === 1) refreshFileList();
   }
 
   function wizardNav(wrap, opts) {
@@ -1076,7 +1087,7 @@
       '<div class="dz-small">' + t('s1DzSmall') + '</div>';
     var picker = document.createElement('input');
     picker.type = 'file';
-    picker.accept = '.pdf,.txt,.md,.json,.csv,.xlsx,application/pdf,text/plain,text/markdown,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    picker.accept = '.pdf,.docx,.pptx,.txt,.md,.json,.csv,.xlsx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown,application/json,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     picker.multiple = true;
     picker.addEventListener('change', function () {
       addFiles(picker.files);
@@ -1215,11 +1226,13 @@
     list.innerHTML = '';
     material.files.forEach(function (f, idx) {
       var row = el('div', 'file-row');
-      row.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'bank' ? '🗂️' : '📝')));
+      row.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'bank' ? '🗂️' : (f.kind === 'docx' ? '📄' : (f.kind === 'pptx' ? '📽️' : '📝')))));
       var meta = el('div', 'file-meta');
       meta.appendChild(el('span', 'file-name', f.name));
       var sub = f.kind === 'pdf'
         ? fmtSize(f.size) + ' · ' + t('s1PagesLabel', { n: f.pages }) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() })
+        : f.kind === 'pptx'
+          ? fmtSize(f.size) + ' · ' + t('s1SlidesLabel', { n: f.pages }) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() })
         : f.kind === 'bank'
           ? fmtSize(f.size) + ' · ' + t('s1BankSaved')
           : fmtSize(f.size) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() });
@@ -1241,13 +1254,14 @@
       var parts = [];
       if (material.files.length) parts.push(t('s1FilesLabel', { n: material.files.length }));
       if (material.pdfPages) parts.push(t('s1PagesLabel', { n: material.pdfPages }));
+      if (material.pptxSlides) parts.push(t('s1SlidesLabel', { n: material.pptxSlides }));
       parts.push(t('s1CharsTotal', { n: chars.toLocaleString() }));
       summary.textContent = chars > 0
         ? t('s1Ready', { parts: parts.join(' · ') })
         : t('s1NoMaterial');
     }
     if (pdfNote) {
-      pdfNote.textContent = material.pdfFailed ? t('s1PdfFail') : '';
+      pdfNote.textContent = material.readError || (material.pdfFailed ? t('s1PdfFail') : '');
     }
     var nextBtn = document.querySelector('.wizard-nav .btn-primary');
     if (nextBtn) nextBtn.disabled = materialChars() === 0;
@@ -1274,6 +1288,9 @@
       material.pdfPages = material.files.reduce(function (sum, g) {
         return sum + (g.kind === 'pdf' ? (g.pages || 0) : 0);
       }, 0);
+      material.pptxSlides = material.files.reduce(function (sum, g) {
+        return sum + (g.kind === 'pptx' ? (g.pages || 0) : 0);
+      }, 0);
     }
   }
 
@@ -1295,6 +1312,8 @@
     var name = file.name || 'file';
     var lower = name.toLowerCase();
     if (lower.endsWith('.pdf')) return addPdfFile(file);
+    if (lower.endsWith('.docx')) return addDocxFile(file);
+    if (lower.endsWith('.pptx')) return addPptxFile(file);
     if (lower.endsWith('.json')) return addJsonFile(file);
     if (lower.endsWith('.xlsx')) return addXlsxFile(file);
     if (lower.endsWith('.csv')) return addCsvFile(file);
@@ -1313,12 +1332,14 @@
 
   function pushMaterial(meta, text) {
     clearSummary();
+    material.readError = '';
     meta.text = text;
     meta.start = material.text.length;
     material.text += (material.text ? '\n\n' : '') + text;
     meta.chars = text.length;
     material.files.push(meta);
     if (meta.kind === 'pdf') material.pdfPages += (meta.pages || 0);
+    if (meta.kind === 'pptx') material.pptxSlides += (meta.pages || 0);
   }
 
   function addJsonFile(file) {
@@ -1664,6 +1685,146 @@
       throw new Error(msg);
     });
   }
+
+  /* Word (.docx) + PowerPoint (.pptx) text extraction — both are
+     ZIP archives of XML (OOXML). JSZip loads LAZILY, only when a
+     .docx or .pptx file is added, from cdnjs — same pattern as
+     pdf.js / SheetJS. Plain text extraction only, no OCR: Word gives
+     the document body (paragraphs and tables, in order); PowerPoint
+     gives the text of every slide, in slide-number order. Images,
+     speaker notes and Word headers/footers are not read. If the CDN
+     cannot be reached, the error is shown and paste / other uploads
+     keep working. */
+  var jszipPromise = null;
+  function loadJsZip() {
+    if (window.JSZip) return Promise.resolve(window.JSZip);
+    if (jszipPromise) return jszipPromise;
+    jszipPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = JSZIP_URL;
+      s.onload = function () {
+        if (!window.JSZip) { reject(new Error(t('errJszipInit'))); return; }
+        resolve(window.JSZip);
+      };
+      s.onerror = function () { reject(new Error(t('errJszipLoad'))); };
+      document.head.appendChild(s);
+    });
+    return jszipPromise;
+  }
+
+  /* Join the text runs of every paragraph in an OOXML part.
+     Returns the paragraphs joined with newlines, or null when the
+     XML does not parse. Runs inside tracked deletions (w:del) are
+     skipped, so deleted text never becomes exam material. */
+  function xmlParagraphText(xmlStr, paraTag, textTag) {
+    var doc = new DOMParser().parseFromString(xmlStr, 'text/xml');
+    if (doc.getElementsByTagName('parsererror').length) return null;
+    var paras = doc.getElementsByTagName(paraTag);
+    var lines = [];
+    for (var i = 0; i < paras.length; i++) {
+      var runs = paras[i].getElementsByTagName(textTag);
+      var line = '';
+      for (var j = 0; j < runs.length; j++) {
+        var node = runs[j];
+        var deleted = false;
+        while (node && node !== paras[i]) {
+          if (node.tagName === 'w:del') { deleted = true; break; }
+          node = node.parentNode;
+        }
+        if (!deleted) line += runs[j].textContent;
+      }
+      if (line.trim()) lines.push(line);
+    }
+    return lines.join('\n');
+  }
+
+  function extractDocxText(zip, name) {
+    var f = zip.file('word/document.xml');
+    if (!f) throw new Error(t('errOfficeZip', { name: name }));
+    return f.async('string').catch(function () {
+      throw new Error(t('errOfficeZip', { name: name }));
+    }).then(function (xml) {
+      var text = xmlParagraphText(xml, 'w:p', 'w:t');
+      if (text === null) throw new Error(t('errOfficeZip', { name: name }));
+      return text;
+    });
+  }
+
+  function slideFileNum(name) {
+    var m = name.match(/slide(\d+)\.xml$/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  function extractPptxText(zip, name) {
+    var names = Object.keys(zip.files).filter(function (n) {
+      return /^ppt\/slides\/slide\d+\.xml$/.test(n);
+    }).sort(function (a, b) { return slideFileNum(a) - slideFileNum(b); });
+    if (!names.length) throw new Error(t('errOfficeNoSlides', { name: name }));
+    var slideTexts = [];
+    var chain = Promise.resolve();
+    names.forEach(function (slideName) {
+      chain = chain.then(function () {
+        return zip.file(slideName).async('string').catch(function () {
+          throw new Error(t('errOfficeZip', { name: name }));
+        });
+      }).then(function (xml) {
+        var text = xmlParagraphText(xml, 'a:p', 'a:t');
+        if (text === null) throw new Error(t('errOfficeZip', { name: name }));
+        if (text) slideTexts.push(text);
+      });
+    });
+    return chain.then(function () {
+      return { text: slideTexts.join('\n\n'), slides: names.length };
+    });
+  }
+
+  function loadOfficeZip(file) {
+    return loadJsZip().then(function () {
+      return file.arrayBuffer();
+    }).then(function (buf) {
+      return window.JSZip.loadAsync(buf).catch(function () {
+        throw new Error(t('errOfficeZip', { name: file.name }));
+      });
+    });
+  }
+
+  function officeReadError(e, file) {
+    var msg = (e && e.message) || t('errOfficeZip', { name: file.name });
+    /* Persist the message on the material state: refreshFileList()
+       rewrites the note line on every render, so a message kept only
+       in the DOM would be wiped as soon as the list refreshes. It is
+       cleared by the next successful upload (pushMaterial). */
+    material.readError = msg;
+    var note = document.getElementById('pdf-note');
+    if (note) note.textContent = msg;
+    throw new Error(msg);
+  }
+
+  function addDocxFile(file) {
+    return loadOfficeZip(file).then(function (zip) {
+      return extractDocxText(zip, file.name);
+    }).then(function (text) {
+      if (!text.trim()) throw new Error(t('errOfficeNoText', { name: file.name }));
+      pushMaterial({ name: file.name, size: file.size, kind: 'docx', chars: text.length, pages: 0 }, text);
+    }).catch(function (e) { officeReadError(e, file); });
+  }
+
+  function addPptxFile(file) {
+    return loadOfficeZip(file).then(function (zip) {
+      return extractPptxText(zip, file.name);
+    }).then(function (out) {
+      if (!out.text.trim()) throw new Error(t('errOfficeNoText', { name: file.name }));
+      pushMaterial({ name: file.name, size: file.size, kind: 'pptx', chars: out.text.length, pages: out.slides }, out.text);
+    }).catch(function (e) { officeReadError(e, file); });
+  }
+
+  /* Test hook (no UI): lets the headless smoke test call the pure
+     XML extractors without driving the DOM. */
+  window.__qfOffice = {
+    extractDocxXml: function (xml) { return xmlParagraphText(xml, 'w:p', 'w:t'); },
+    extractPptxXml: function (xml) { return xmlParagraphText(xml, 'a:p', 'a:t'); },
+    loadJsZip: loadJsZip
+  };
 
   /* ----- Step 2: your AI key (BYO) ----- */
 

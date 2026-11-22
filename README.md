@@ -39,13 +39,20 @@ The interface is fully bilingual — switch to Arabic from the header and the wh
 
 ## How it works
 
-1. **Upload material** — drag-and-drop or pick files: PDF, text
-   (`.txt` / `.md`), or a question bank (`.json`). Multiple files merge
-   into one material. You can also paste text directly. PDF text is
-   extracted in the browser with pdf.js (loaded lazily from a CDN the
-   first time you add a PDF; plain text extraction only, no OCR). If
-   the reader cannot load, the app tells you to paste the text instead
-   and everything else keeps working offline.
+1. **Upload material** — drag-and-drop or pick files: PDF, Word
+   (`.docx`), PowerPoint (`.pptx`), text (`.txt` / `.md`), or a
+   question bank (`.json`). Multiple files merge into one material.
+   You can also paste text directly. PDF text is extracted in the
+   browser with pdf.js (loaded lazily from a CDN the first time you
+   add a PDF; plain text extraction only, no OCR). Word body text
+   (paragraphs and tables, in order) and PowerPoint slide text (every
+   slide, in slide-number order) are extracted in the browser with
+   JSZip (loaded lazily from a CDN the first time you add a Word or
+   PowerPoint file; plain text extraction only, no OCR — images,
+   speaker notes and Word headers/footers are not read, and tracked
+   deleted text is skipped). If a reader cannot load, the app tells
+   you to paste the text instead and everything else keeps working
+   offline.
 2. **Your AI key** — pick a provider (Google Gemini, OpenAI, Anthropic
    Claude, or any OpenAI-compatible endpoint), paste your API key, pick
    a model, and press **Test connection**. You spend your own credits;
@@ -422,6 +429,12 @@ fill,The capital of France is ____.,,Paris,The capital is Paris.,Geography
   time one is added (same pattern as pdf.js). If the CDN cannot be
   reached you get a clear message and CSV paste / upload keep
   working.
+- `.docx` / `.pptx` files load the JSZip library lazily from a CDN
+  the first time one is added (same pattern as pdf.js). If the CDN
+  cannot be reached you get a clear message and paste / other uploads
+  keep working. A file that is not a real Word/PowerPoint file, a
+  presentation with no slides, or a file with no readable text shows
+  a clear error and adds nothing.
 
 ## Library backup
 
@@ -459,9 +472,10 @@ app.
   A small bar under the header tells you when you are offline.
 - **Needs internet, and says so:** AI exam generation, translation,
   material summary, essay grading, and the first-time load of the
-  PDF reader (pdf.js) and spreadsheet reader (SheetJS) all need a
-  connection. Offline, each one shows a clear "you are offline"
-  message instead of failing silently or inventing an answer.
+  PDF reader (pdf.js), spreadsheet reader (SheetJS) and Word /
+  PowerPoint reader (JSZip) all need a connection. Offline, each one
+  shows a clear "you are offline" message instead of failing silently
+  or inventing an answer.
 - The cache is versioned (`quizforge-v1` in `sw.js`): when the app
   updates, the new service worker replaces the old cache cleanly.
   Opening the app over `file://` skips service-worker registration
@@ -623,8 +637,10 @@ strings in the **correct** order. Neither shape has "options" or
 
 It also works as a static site on Netlify Drop, Vercel, or Cloudflare Pages —
 just upload the folder. Note: PDF reading loads pdf.js from cdnjs the
-first time a PDF is added, so that one step needs internet; the demo
-bank and everything else work fully offline once loaded.
+first time a PDF is added, and Word/PowerPoint reading loads JSZip
+from cdnjs the first time a .docx or .pptx file is added, so those
+steps need internet; the demo bank and everything else work fully
+offline once loaded.
 
 ## Contributing
 
