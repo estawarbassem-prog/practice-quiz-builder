@@ -62,13 +62,17 @@
   var strictTimerId = null;
   var strictWarned = false;      // one fullscreen-exit warning per attempt
   var strictFsAttempted = false; // fullscreen was requested this attempt
+  /* Oral exam mode (2026-11-22): per-exam toggle on the start screen,
+     off by default. oralMode is the toggle state; run.oral is the
+     live flag on the attempt (review sessions never run oral). */
+  var oralMode = false;
   /* Exam translation (Feature 12): the original questions are kept
      untouched in trState.original; quiz.questions is swapped between
      the original and the translated copy. trState.bank remembers
      which bank object was translated, so loadBank() can restore it
      before clearing the state. */
   var trState = { original: null, translated: null, lang: null, sourceLang: null, bank: null, busy: false };
-  var currentView = 'create';      // 'create' | 'library' | 'stats' | 'quiz'
+  var currentView = 'create';      // 'create' | 'library' | 'stats' | 'quiz' | 'chat' | 'past' | 'summary' | 'flashcards' | 'cheatsheet'
 
   /* ---------- offline (Feature 14) ----------
      navigator.onLine is false when the browser knows it is offline.
@@ -120,7 +124,7 @@
 
   /* ---------- wizard state ---------- */
   var wiz = loadWizard();   // { step, title, count, types:{mcq,tf}, difficulty, language, focus, perQTimer }
-  var material = { files: [], pasted: '', text: '', pdfPages: 0, pptxSlides: 0, pdfFailed: false, readError: '' };
+  var material = { files: [], pasted: '', text: '', pdfPages: 0, pptxSlides: 0, pdfFailed: false, readError: '', sourceUrl: '' };
   // material.files: [{name, size, kind: 'pdf'|'text'|'bank'|'docx'|'pptx', chars, pages?}]
   var byok = loadByok();    // {provider, apiKey, model, baseUrl, proxyUrl}
   var genState = { busy: false, error: '', progress: '', lastBank: null };
@@ -204,6 +208,20 @@
         if (q.maxScore !== undefined &&
           (typeof q.maxScore !== 'number' || q.maxScore < 1 || q.maxScore > 100))
           throw new Error(t('valMaxScore', { n: n }));
+      } else if (qt === 'tf') {
+        /* True/False: two options, an in-range answer, and a
+           REQUIRED justification — a statement without its reason
+           is rejected, like an essay without a rubric. The repair
+           (explanation -> justification) happens in
+           parseQuestionsResponse / the import paths before this
+           runs, so a question that reaches here with no
+           justification at all has nothing to repair from. */
+        if (!Array.isArray(q.options) || q.options.length < 2)
+          throw new Error(t('valOptions', { n: n }));
+        if (typeof q.answer !== 'number' || q.answer < 0 || q.answer >= q.options.length)
+          throw new Error(t('valAnswerRange', { n: n }));
+        if (typeof q.justification !== 'string' || !q.justification.trim())
+          throw new Error(t('valTfJustification', { n: n }));
       } else if (qt === 'fill') {
         if (!Array.isArray(q.answers) || q.answers.length < 1 ||
           q.answers.some(function (a) { return typeof a !== 'string' || !a.trim(); }))
@@ -283,6 +301,59 @@
     if (q && Array.isArray(q.options) && q.options.length === 2) return 'tf';
     return 'mcq';
   }
+
+  /* ---------- True/False with justification (2026-11-22) ----------
+     A 'tf' question is a statement with two options ("True" /
+     "False") and a REQUIRED "justification" — the reason the
+     statement is true or false, grounded in the material. The
+     justification is the point of the type: it is shown right
+     after answering and prominently in the results review, on the
+     flashcard back, in the print answer key, and it travels with
+     the exam through translation and sharing.
+     - tfDisplayText: the two option labels are UI chrome, not
+       content, so the standard English words are shown in the UI
+       language (True/False in English, صح/خطأ in Arabic).
+       Anything else the provider stored is shown as-is.
+     - tfJustification: the justification, falling back to the
+       generic explanation for older banks that never had one, so
+       nothing already saved ever shows a blank reason.
+     - repairTfQuestions: copy "explanation" into a missing
+       "justification" — the repair half of "reject or repair"
+       (see validate). */
+  function tfDisplayText(text) {
+    var s = String(text == null ? '' : text).trim();
+    if (/^true$/i.test(s)) return t('tfTrue');
+    if (/^false$/i.test(s)) return t('tfFalse');
+    return text;
+  }
+
+  function tfJustification(q) {
+    if (q && typeof q.justification === 'string' && q.justification.trim())
+      return q.justification;
+    if (q && typeof q.explanation === 'string' && q.explanation.trim())
+      return q.explanation;
+    return '';
+  }
+
+  function repairTfQuestions(data) {
+    if (!data || !Array.isArray(data.questions)) return data;
+    data.questions.forEach(function (q) {
+      if (q && qType(q) === 'tf' &&
+        !(typeof q.justification === 'string' && q.justification.trim()) &&
+        typeof q.explanation === 'string' && q.explanation.trim()) {
+        q.justification = q.explanation;
+      }
+    });
+    return data;
+  }
+
+  /* Test/debug handle (like window.__qfSheet / __qfChat): the pure
+     True/False helpers, for the headless smoke test. */
+  window.__qfTf = {
+    displayText: tfDisplayText,
+    justificationOf: tfJustification,
+    repair: repairTfQuestions
+  };
 
   function essayMax(q) {
     return (typeof q.maxScore === 'number' && q.maxScore >= 1 && q.maxScore <= 100)
@@ -811,9 +882,18 @@
       backFace.appendChild(el('p', 'fc-meta', t('codeLangNote')));
     } else {
       var letter = LETTERS[q.answer] || '';
-      backFace.appendChild(el('p', 'fc-answer', t('fcAnswer') + (letter ? letter + ' — ' : '') + q.options[q.answer]));
+      var ansText = qt === 'tf' ? tfDisplayText(q.options[q.answer]) : q.options[q.answer];
+      backFace.appendChild(el('p', 'fc-answer', t('fcAnswer') + (letter ? letter + ' — ' : '') + ansText));
     }
-    if (q.explanation) backFace.appendChild(el('p', 'fc-why', t('printWhy') + q.explanation));
+    /* True/False justification on the back of the card — the point
+       of the type. The generic explanation is skipped when the
+       justification is shown, so the same reason is never printed
+       twice. */
+    if (qt === 'tf' && tfJustification(q)) {
+      backFace.appendChild(el('p', 'fc-why', t('tfJustification') + tfJustification(q)));
+    } else if (q.explanation) {
+      backFace.appendChild(el('p', 'fc-why', t('printWhy') + q.explanation));
+    }
     backFace.appendChild(el('p', 'fc-hint', t('fcFlipHint')));
     inner.appendChild(backFace);
 
@@ -932,6 +1012,7 @@
     if (run && run.strict) exitFullscreen();
     stopTimers();
     stopSpeech();
+    stopOralRecognition();
     run = null;
     fc = null;
     document.getElementById('nav-create').classList.toggle('active', v === 'create');
@@ -958,7 +1039,20 @@
       else renderWizard();
     }
     else if (currentView === 'library') renderLibrary();
+    else if (currentView === 'chat') {
+      if (chatState) renderChat();
+      else setView('library');
+    }
+    else if (currentView === 'past') {
+      if (pastState) renderPast();
+      else setView('library');
+    }
     else if (currentView === 'stats') renderStats();
+    else if (currentView === 'cheatsheet') {
+      if (cheatState.sheet) showCheatSheet(cheatState.sheet, cheatState.returnTo);
+      else if (run && run.resultsShown) showResults();
+      else renderStats();
+    }
     else if (currentView === 'flashcards') {
       if (fc) renderFlashcards();
       else showStart();
@@ -1136,6 +1230,66 @@
     });
     card.appendChild(ta);
 
+    /* ----- Generate questions from a link (2026-11-22) -----
+       A URL input + Fetch button: the page text becomes material and
+       flows into the existing generation pipeline unchanged. Direct
+       fetch first; on failure a clear message + paste fallback right
+       here. An opt-in, labelled checkbox may route the URL through
+       the public reader service r.jina.ai — never silently. */
+    var urlBox = el('div', 'url-box');
+    urlBox.appendChild(el('h3', null, t('urlTitle')));
+    urlBox.appendChild(el('p', 'hero-text', t('urlHero')));
+    var urlLabel = el('label', 'field-label', t('urlLabel'));
+    urlLabel.htmlFor = 'url-input';
+    urlBox.appendChild(urlLabel);
+    var urlRow = el('div', 'url-row');
+    var urlInput = document.createElement('input');
+    urlInput.id = 'url-input';
+    urlInput.type = 'url';
+    urlInput.className = 'input';
+    urlInput.placeholder = t('urlPh');
+    urlInput.setAttribute('dir', 'ltr');
+    urlInput.style.textAlign = 'left';
+    urlInput.value = material.sourceUrl || '';
+    urlRow.appendChild(urlInput);
+    var urlFetchBtn = el('button', 'btn btn-primary btn-small', t('urlFetch'));
+    urlFetchBtn.id = 'url-fetch-btn';
+    urlFetchBtn.type = 'button';
+    urlFetchBtn.addEventListener('click', function () { fetchUrlMaterial(); });
+    urlRow.appendChild(urlFetchBtn);
+    urlBox.appendChild(urlRow);
+    var urlProxyRow = el('label', 'url-proxy-row');
+    var urlProxyOpt = document.createElement('input');
+    urlProxyOpt.id = 'url-proxy-opt';
+    urlProxyOpt.type = 'checkbox';
+    urlProxyRow.appendChild(urlProxyOpt);
+    urlProxyRow.appendChild(document.createTextNode(' ' + t('urlProxyOpt')));
+    urlBox.appendChild(urlProxyRow);
+    var urlStatus = el('div', 'bank-error');
+    urlStatus.id = 'url-status';
+    urlBox.appendChild(urlStatus);
+    /* Paste fallback — hidden until a fetch fails (or the browser is
+       offline), so the failure is never silent and never a dead end. */
+    var urlFallback = el('div', 'url-fallback');
+    urlFallback.id = 'url-fallback';
+    urlFallback.hidden = true;
+    var urlPasteLabel = el('label', 'field-label', t('urlPasteLabel'));
+    urlPasteLabel.htmlFor = 'url-paste';
+    urlFallback.appendChild(urlPasteLabel);
+    var urlPasteTa = document.createElement('textarea');
+    urlPasteTa.id = 'url-paste';
+    urlPasteTa.className = 'input textarea';
+    urlPasteTa.rows = 5;
+    urlPasteTa.placeholder = t('urlPastePh');
+    urlFallback.appendChild(urlPasteTa);
+    var urlPasteBtn = el('button', 'btn btn-secondary btn-small', t('urlPasteUse'));
+    urlPasteBtn.id = 'url-paste-btn';
+    urlPasteBtn.type = 'button';
+    urlPasteBtn.addEventListener('click', function () { useUrlPaste(); });
+    urlFallback.appendChild(urlPasteBtn);
+    urlBox.appendChild(urlFallback);
+    card.appendChild(urlBox);
+
     /* ----- Spreadsheet import (Feature 13) ----- */
     var sheetBox = el('div', 'sheet-box');
     sheetBox.appendChild(el('h3', null, t('sheetTitle')));
@@ -1213,6 +1367,16 @@
     sumStatus.id = 'sum-status';
     card.appendChild(sumStatus);
 
+    /* Past-exam analysis (Feature 2, 2026-11-22): same entry point
+       from the create tab, for students starting from old exams. */
+    var pastRow = el('div', 'btnrow sum-row');
+    var pastStepBtn = el('button', 'btn btn-secondary', t('pastBtn'));
+    pastStepBtn.id = 'past-btn-step1';
+    pastStepBtn.type = 'button';
+    pastStepBtn.addEventListener('click', function () { openPastAnalysis(); });
+    pastRow.appendChild(pastStepBtn);
+    card.appendChild(pastRow);
+
     var pdfNote = el('p', 'field-hint');
     pdfNote.id = 'pdf-note';
     card.appendChild(pdfNote);
@@ -1233,7 +1397,7 @@
     list.innerHTML = '';
     material.files.forEach(function (f, idx) {
       var row = el('div', 'file-row');
-      row.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'bank' ? '🗂️' : (f.kind === 'docx' ? '📄' : (f.kind === 'pptx' ? '📽️' : '📝')))));
+      row.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'bank' ? '🗂️' : (f.kind === 'docx' ? '📄' : (f.kind === 'pptx' ? '📽️' : (f.kind === 'url' ? '🔗' : '📝'))))));
       var meta = el('div', 'file-meta');
       meta.appendChild(el('span', 'file-name', f.name));
       var sub = f.kind === 'pdf'
@@ -1299,6 +1463,14 @@
         return sum + (g.kind === 'pptx' ? (g.pages || 0) : 0);
       }, 0);
     }
+    /* A removed link takes its source URL with it — the source is
+       always the latest remaining link, or nothing. */
+    if (f.kind === 'url') {
+      var remaining = material.files.filter(function (g) { return g.kind === 'url'; });
+      material.sourceUrl = remaining.length ? remaining[remaining.length - 1].name : '';
+      var urlInput = document.getElementById('url-input');
+      if (urlInput) urlInput.value = material.sourceUrl;
+    }
   }
 
   function addFiles(fileList) {
@@ -1349,12 +1521,205 @@
     if (meta.kind === 'pptx') material.pptxSlides += (meta.pages || 0);
   }
 
+  /* ---------- generate questions from a link (2026-11-22) ----------
+     Paste a URL, fetch the page client-side, extract its readable
+     text and push it as material (kind 'url'), so the existing
+     pipeline — chunking, settings, provider, save with material —
+     runs unchanged. The source URL is kept on material.sourceUrl and
+     stored with the saved exam.
+     - Direct fetch first. Many sites block cross-origin fetches, so
+       a failure shows a plain message and offers the paste fallback
+       right there — never a silent failure, never a fake fetch.
+     - Reader service: only if the student ticks the labelled box,
+       the URL may go through the public reader r.jina.ai (no key,
+       plain fetch). It is never used silently.
+     - Very long pages are capped at VARIANT_MATERIAL_MAX (200,000
+       chars, the same cap used elsewhere) with a plain note.
+     - Non-HTML responses (plain text) are used as-is. Extracted text
+       keeps headings/paragraphs/list items only — links are dropped
+       to their text, so there are no relative URLs left to resolve;
+       the stored source URL itself is always absolute. */
+  var URL_FETCH_TIMEOUT_MS = 30000;
+  var READER_BASE = 'https://r.jina.ai/';
+
+  function normalizeUrl(raw) {
+    var s = String(raw == null ? '' : raw).trim();
+    if (!s) return null;
+    /* A URL never contains a literal space — Chrome's URL parser
+       would silently percent-encode one ('not a url' becomes a
+       "valid" https URL), so reject whitespace up front. */
+    if (/\s/.test(s)) return null;
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) s = 'https://' + s;
+    try {
+      var u = new URL(s);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+      return u.href;
+    } catch (e) { return null; }
+  }
+
+  function readerUrlFor(pageUrl) {
+    return READER_BASE + pageUrl;
+  }
+
+  function extractReadableText(html, baseUrl) {
+    var doc;
+    try {
+      doc = new DOMParser().parseFromString(html, 'text/html');
+    } catch (e) { return ''; }
+    if (!doc || !doc.body) return '';
+    /* DOMParser never runs scripts, but the tags are still in the
+       tree — drop everything that is not readable content. */
+    var drop = doc.querySelectorAll('script, style, noscript, iframe, svg, form, button, input, select, textarea, nav, header, footer, aside');
+    Array.prototype.forEach.call(drop, function (n) { if (n.parentNode) n.parentNode.removeChild(n); });
+    /* Prefer the article/main content when the page marks it. */
+    var root = doc.querySelector('article') || doc.querySelector('main') || doc.body;
+    var nodes = root.querySelectorAll('h1, h2, h3, h4, p, li, blockquote, td, th, figcaption');
+    var parts = [];
+    Array.prototype.forEach.call(nodes, function (n) {
+      /* Skip text that lives inside a nested picked node (a <p>
+         inside an <li> would otherwise appear twice). */
+      var p = n.parentNode;
+      var nested = false;
+      while (p && p !== root) {
+        if (p.tagName && /^(H1|H2|H3|H4|P|LI|BLOCKQUOTE|TD|TH|FIGCAPTION)$/.test(p.tagName)) { nested = true; break; }
+        p = p.parentNode;
+      }
+      if (nested) return;
+      var txt = (n.textContent || '').replace(/\s+/g, ' ').trim();
+      if (txt) parts.push(txt);
+    });
+    if (!parts.length) {
+      var bodyTxt = (root.textContent || '').replace(/\s+/g, ' ').trim();
+      if (bodyTxt) parts.push(bodyTxt);
+    }
+    return parts.join('\n\n');
+  }
+
+  function urlStatusBox() {
+    return document.getElementById('url-status');
+  }
+
+  function showUrlStatus(ok, msg) {
+    var box = urlStatusBox();
+    if (!box) return;
+    box.textContent = msg;
+    box.className = ok ? 'gen-success show' : 'bank-error show';
+  }
+
+  function hideUrlStatus() {
+    var box = urlStatusBox();
+    if (box) { box.textContent = ''; box.className = 'bank-error'; }
+  }
+
+  function addUrlMaterial(url, text, viaReader) {
+    var truncated = text.length > VARIANT_MATERIAL_MAX;
+    if (truncated) text = text.slice(0, VARIANT_MATERIAL_MAX);
+    pushMaterial({ name: url, size: text.length, kind: 'url', chars: text.length, pages: 0 }, text);
+    material.sourceUrl = url;
+    var msg = t('urlOk', { n: text.length.toLocaleString() });
+    if (truncated) msg += ' ' + t('urlTruncated', { n: VARIANT_MATERIAL_MAX.toLocaleString() });
+    if (viaReader) msg += ' ' + t('urlViaReader');
+    showUrlStatus(true, msg);
+    var fb = document.getElementById('url-fallback');
+    if (fb) fb.hidden = true;
+    refreshFileList();
+  }
+
+  function fetchUrlMaterial() {
+    var input = document.getElementById('url-input');
+    var btn = document.getElementById('url-fetch-btn');
+    var proxyOpt = document.getElementById('url-proxy-opt');
+    var url = normalizeUrl(input ? input.value : '');
+    if (!url) {
+      showUrlStatus(false, t('urlInvalid'));
+      var fb0 = document.getElementById('url-fallback');
+      if (fb0) fb0.hidden = true;
+      return;
+    }
+    if (isOffline()) {
+      showUrlStatus(false, t('offlineNeedNet'));
+      var fbOff = document.getElementById('url-fallback');
+      if (fbOff) fbOff.hidden = false;
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = t('urlFetching'); }
+    hideUrlStatus();
+    fetchWithTimeout(url, { method: 'GET' }, URL_FETCH_TIMEOUT_MS)
+      .then(function (res) {
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        var ct = (res.headers.get('content-type') || '').toLowerCase();
+        return res.text().then(function (raw) { return { raw: raw, isHtml: ct.indexOf('text/html') !== -1 || /^\s*</.test(raw) }; });
+      })
+      .then(function (got) {
+        var text = got.isHtml ? extractReadableText(got.raw, url) : got.raw.trim();
+        if (!text) throw new Error(t('urlNoText'));
+        addUrlMaterial(url, text, false);
+      })
+      .catch(function (e) {
+        /* A page that loaded but had no readable text is not a
+           blocked fetch — say so plainly, with the same fallback. */
+        if (e && e.message === t('urlNoText')) { showUrlBlocked(t('urlNoText')); return; }
+        /* Direct fetch failed (usually CORS). Only with the student's
+           explicit tick do we try the public reader service. */
+        if (proxyOpt && proxyOpt.checked) {
+          return fetchWithTimeout(readerUrlFor(url), { method: 'GET' }, URL_FETCH_TIMEOUT_MS)
+            .then(function (res) {
+              if (!res.ok) throw new Error('HTTP ' + res.status);
+              return res.text();
+            })
+            .then(function (raw) {
+              var text = raw.trim();
+              if (!text) throw new Error(t('urlNoText'));
+              addUrlMaterial(url, text, true);
+            })
+            .catch(function (e2) {
+              if (e2 && e2.message === t('urlNoText')) showUrlBlocked(t('urlNoText'));
+              else showUrlBlocked(t('urlBlocked'));
+            });
+        }
+        showUrlBlocked(t('urlBlocked'));
+        function showUrlBlocked(msg) {
+          showUrlStatus(false, msg);
+          var fb = document.getElementById('url-fallback');
+          if (fb) { fb.hidden = false; var ta2 = document.getElementById('url-paste'); if (ta2) ta2.focus(); }
+        }
+      })
+      .then(function () {
+        if (btn) { btn.disabled = false; btn.textContent = t('urlFetch'); }
+      });
+  }
+
+  function useUrlPaste() {
+    var input = document.getElementById('url-input');
+    var ta2 = document.getElementById('url-paste');
+    var text = ta2 ? ta2.value.trim() : '';
+    if (!text) { showUrlStatus(false, t('urlPasteEmpty')); return; }
+    var url = normalizeUrl(input ? input.value : '');
+    pushMaterial({ name: url || t('urlPastedName'), size: text.length, kind: 'url', chars: text.length, pages: 0 }, text);
+    if (url) material.sourceUrl = url;
+    showUrlStatus(true, t('urlPasteOk'));
+    var fb = document.getElementById('url-fallback');
+    if (fb) fb.hidden = true;
+    if (ta2) ta2.value = '';
+    refreshFileList();
+  }
+
+  /* Test/debug handle (like window.__qfTf): the pure URL helpers,
+     for the headless smoke test. */
+  window.__qfUrl = {
+    normalizeUrl: normalizeUrl,
+    extractReadableText: extractReadableText,
+    readerUrlFor: readerUrlFor,
+    maxChars: VARIANT_MATERIAL_MAX
+  };
+
   function addJsonFile(file) {
     return new Promise(function (resolve, reject) {
       var reader = new FileReader();
       reader.onload = function () {
         try {
           var data = JSON.parse(String(reader.result || ''));
+          repairTfQuestions(data);
           validate(data);
           var lib = loadLibrary();
           lib.unshift({
@@ -1490,6 +1855,9 @@
       else if (low === 'b') ans = 1;
       else return { error: t('sheetSkipCorrect') };
       q = { type: 'tf', question: question, options: ['True', 'False'], answer: ans };
+      /* A sheet row's explanation column doubles as the tf
+         justification, so rows with an explanation still import. */
+      if (explRaw) q.justification = explRaw;
     } else {
       if (optionsRaw.length < 2) return { error: t('sheetSkipOptions') };
       var corr = String(correctRaw).trim().replace(/[.)]$/, '');
@@ -2292,6 +2660,10 @@
       throw new Error(t('errBadJson', { label: partLabel ? ' (' + partLabel + ')' : '' }));
     }
     if (Array.isArray(data)) data = { questions: data };
+    /* Repair first: a True/False question that only carries an
+       "explanation" gets it copied into "justification"; validate
+       then rejects any tf question still missing one. */
+    repairTfQuestions(data);
     try {
       validate(data);
     } catch (e) {
@@ -2396,7 +2768,8 @@
      One-tap translation of the exam CONTENT — not the UI language
      (the two are independent: translating the exam never calls
      setLang, and switching the UI language never re-translates).
-     Translated: question text, options, explanations, essay rubrics,
+     Translated: question text, options, explanations, True/False
+     justifications, essay rubrics,
      matching pairs (left + right) and ordering items. NEVER
      translated: code snippets (q.code), coding starterCode, test
      inputs / expected outputs, fill-in accepted answers, topics
@@ -2421,7 +2794,7 @@
   function detectExamLang(questions) {
     var ar = 0, lat = 0;
     (questions || []).forEach(function (q) {
-      [q.question, q.explanation].concat(q.options || []).forEach(function (s) {
+      [q.question, q.explanation, q.justification].concat(q.options || []).forEach(function (s) {
         String(s || '').split('').forEach(function (ch) {
           if (/[\u0600-\u06FF\u0750-\u077F]/.test(ch)) ar++;
           else if (/[A-Za-z]/.test(ch)) lat++;
@@ -2442,6 +2815,7 @@
     (questions || []).forEach(function (q, i) {
       add('q' + i + '.question', q.question);
       add('q' + i + '.explanation', q.explanation);
+      add('q' + i + '.justification', q.justification);
       (q.options || []).forEach(function (o, j) { add('q' + i + '.options.' + j, o); });
       add('q' + i + '.rubric', q.rubric);
       (q.pairs || []).forEach(function (p, j) {
@@ -2503,6 +2877,7 @@
     questions.forEach(function (q, i) {
       if (get('q' + i + '.question') !== undefined) q.question = get('q' + i + '.question');
       if (get('q' + i + '.explanation') !== undefined) q.explanation = get('q' + i + '.explanation');
+      if (get('q' + i + '.justification') !== undefined) q.justification = get('q' + i + '.justification');
       (q.options || []).forEach(function (o, j) {
         if (get('q' + i + '.options.' + j) !== undefined) q.options[j] = get('q' + i + '.options.' + j);
       });
@@ -2661,7 +3036,7 @@
     var s = settings || wiz;
     var types = [];
     if (s.types.mcq) types.push('multiple-choice questions with exactly 4 options');
-    if (s.types.tf) types.push('True/False questions with exactly 2 options: "True" and "False"');
+    if (s.types.tf) types.push('True/False questions: a statement with exactly 2 options ("True" and "False") and a "justification" — a short explanation of why the statement is true or false, grounded in the material');
     if (s.types.essay) types.push('essay questions: a free-text question with a short grading rubric and a "maxScore" of 5');
     if (s.types.fill) types.push('fill-in-the-blank questions: a sentence with exactly one blank written as ____, plus an "answers" array of accepted answers');
     if (s.types.coding) types.push('coding questions in JavaScript ONLY: a programming task with "language" set to "JavaScript", "starterCode" (the code the student starts from), and "tests" (an array of objects with "input" — a JavaScript expression that calls the student\'s function, e.g. "sum(2, 3)" — and "expected" — the exact expected result as a string, e.g. "5"). Never use any other language.');
@@ -2678,6 +3053,9 @@
       (s.types.mcq && s.types.tf ? '4 strings for multiple-choice or 2 strings ("True","False") for True/False' :
         s.types.tf ? '2 strings: "True" and "False"' : '4 strings') +
       ') and "answer" (0-based index of the correct option). ' +
+      'True/False questions ALSO need "justification" (a string explaining why the statement is true or false, ' +
+      'grounded in the material — e.g. for the statement "A pointer holds the value of a variable" with answer ' +
+      'False: "A pointer holds the ADDRESS of a variable, not its value."). ' +
       'Essay questions need "rubric" (a short grading rubric string) and "maxScore" (a number, use 5), ' +
       'and must NOT have "options" or "answer". ' +
       'Fill-in-the-blank questions need "answers" (an array of 2–4 accepted answers for the blank, ' +
@@ -3140,6 +3518,9 @@
            be made from the same material later. Material over the cap
            is not stored (see VARIANT_MATERIAL_MAX). */
         material: fullText.length <= VARIANT_MATERIAL_MAX ? fullText : '',
+        /* Generate from a link (2026-11-22): where the questions came
+           from, shown on the exam card in My exams. */
+        sourceUrl: material.sourceUrl || '',
         gen: {
           count: wiz.count,
           difficulty: wiz.difficulty,
@@ -3276,6 +3657,7 @@
         model: effectiveModel(),
         bank: bank,
         material: entry.material,
+        sourceUrl: entry.sourceUrl || '',
         gen: settings,
         variant: n,
         baseTitle: baseTitle
@@ -3297,6 +3679,977 @@
     });
   }
 
+  /* ---------- chat with the material (Feature 1 of the new queue, 2026-11-22) ----------
+     A chat screen where the student asks questions about material and
+     gets answers from their own provider (the same BYOK key as
+     generation), grounded ONLY in the material text. Two ways in:
+     - from an exam card in My exams (the material stored with the exam);
+     - fresh, from the library header (upload files / paste text here).
+     Grounding: the material is chunked like generation does
+     (splitChunks, ~12,000 chars) and only the chunk(s) most relevant
+     to the question are sent — picked by word overlap with the
+     question. The provider is told to answer only from the material,
+     to say so when the material does not contain the answer, and to
+     quote short passages. The reply is JSON {"answer", "quotes"}; a
+     reply that is not JSON is shown as plain text rather than dropped
+     (Claude does not force JSON mode). No key, or offline: a plain
+     message, nothing generated, never a fake answer. History is kept
+     in memory and persisted per exam in localStorage (qf-chat),
+     capped so one chat can never eat the quota. */
+  var LS_CHAT = 'qf-chat';
+  var CHAT_MAX_MESSAGES = 30;   // per chat, kept in storage
+  var CHAT_MAX_CHUNKS = 2;      // most relevant chunks sent per question
+  var chatState = null;         // {key, examId, examTitle, files, pasted, text, messages, busy, draft, truncated, readError}
+
+  function loadChatStore() {
+    try {
+      var raw = localStorage.getItem(LS_CHAT);
+      var store = raw ? JSON.parse(raw) : {};
+      return store && typeof store === 'object' ? store : {};
+    } catch (e) { return {}; }
+  }
+
+  function saveChatStore(store) {
+    try { localStorage.setItem(LS_CHAT, JSON.stringify(store)); } catch (e) {}
+  }
+
+  function saveChatHistory() {
+    if (!chatState) return;
+    var store = loadChatStore();
+    store[chatState.key] = { messages: chatState.messages.slice(-CHAT_MAX_MESSAGES) };
+    saveChatStore(store);
+  }
+
+  function openChat(entry) {
+    var key = entry ? entry.id : 'fresh';
+    var stored = loadChatStore();
+    var saved = stored[key];
+    var text = entry ? (entry.material || '') : '';
+    chatState = {
+      key: key,
+      examId: entry ? entry.id : null,
+      examTitle: entry ? entry.title : '',
+      files: [],
+      pasted: '',
+      text: text.length > VARIANT_MATERIAL_MAX ? text.slice(0, VARIANT_MATERIAL_MAX) : text,
+      messages: saved && Array.isArray(saved.messages) ? saved.messages : [],
+      busy: false,
+      draft: '',
+      truncated: text.length > VARIANT_MATERIAL_MAX,
+      readError: ''
+    };
+    currentView = 'chat';
+    document.getElementById('nav-create').classList.remove('active');
+    document.getElementById('nav-library').classList.remove('active');
+    document.getElementById('nav-stats').classList.remove('active');
+    renderChat();
+    window.scrollTo({ top: 0 });
+  }
+
+  /* Word tokens for relevance scoring: Latin letters/digits and
+     Arabic letters, at least 2 characters. */
+  function chatWordTokens(s) {
+    return String(s || '').toLowerCase().split(/[^a-z0-9\u0600-\u06ff]+/g)
+      .filter(function (w) { return w.length >= 2; });
+  }
+
+  /* The chunk(s) most relevant to the question, by distinct-word
+     overlap. Ties keep the material's own order. Short material
+     (one or two chunks) is sent whole — there is nothing to choose. */
+  function pickChatChunks(materialText, question) {
+    var chunks = splitChunks(materialText);
+    if (chunks.length <= CHAT_MAX_CHUNKS) return chunks;
+    var words = chatWordTokens(question);
+    if (!words.length) return chunks.slice(0, CHAT_MAX_CHUNKS);
+    var scored = chunks.map(function (c, i) {
+      var low = c.toLowerCase();
+      var seen = {};
+      var score = 0;
+      words.forEach(function (w) {
+        if (!seen[w] && low.indexOf(w) !== -1) { seen[w] = true; score++; }
+      });
+      return { i: i, score: score };
+    });
+    scored.sort(function (a, b) { return b.score - a.score || a.i - b.i; });
+    var top = scored.slice(0, CHAT_MAX_CHUNKS).map(function (s) { return s.i; })
+      .sort(function (a, b) { return a - b; });
+    return top.map(function (i) { return chunks[i]; });
+  }
+
+  function buildChatPrompt(question, chunks, history) {
+    var hist = '';
+    if (history && history.length) {
+      hist = 'Earlier in this conversation:\n' + history.map(function (m) {
+        var txt = String(m.text || '').slice(0, 300);
+        return (m.role === 'user' ? 'Student: ' : 'Assistant: ') + txt;
+      }).join('\n') + '\n\n';
+    }
+    return 'You are a study assistant. Answer the student\'s question using ONLY the material below. ' +
+      'If the material does not contain the answer, say so clearly and do not invent anything. ' +
+      'Answer in the same language as the question. ' +
+      'Quote short passages from the material to support your answer where possible.\n\n' +
+      'Reply with JSON ONLY — no markdown fences, no extra text. The JSON must be an object with ' +
+      '"answer" (the answer as a string) and "quotes" (an array of short strings, each an exact quote ' +
+      'from the material that supports the answer; an empty array if none apply).\n\n' +
+      hist + 'QUESTION: ' + question + '\n\nMATERIAL:\n' + chunks.join('\n\n---\n\n');
+  }
+
+  /* The reply should be {"answer", "quotes"}. A reply that is not
+     JSON at all (Claude does not force JSON mode) is shown as plain
+     text rather than dropped; a JSON reply with no usable answer is
+     a real failure, not something to guess at. */
+  function parseChatResponse(raw) {
+    var text = String(raw || '').trim();
+    if (!text) throw new Error(t('errEmptyReply', { who: PROVIDERS[byok.provider].label }));
+    try {
+      var data = JSON.parse(extractJsonText(text));
+      var ans = data && typeof data.answer === 'string' ? data.answer.trim() : '';
+      if (!ans) throw new Error('__no-answer__');
+      var quotes = Array.isArray(data.quotes) ? data.quotes
+        .filter(function (q) { return typeof q === 'string' && q.trim(); })
+        .map(function (q) { return q.trim(); }).slice(0, 4) : [];
+      return { answer: ans, quotes: quotes };
+    } catch (e) {
+      if (e && e.message === '__no-answer__') throw new Error(t('chatBadReply'));
+      return { answer: text, quotes: [] };
+    }
+  }
+
+  /* ---------- chat material: fresh uploads in the chat screen ----------
+     Reuses the same readers as the wizard (pdf.js lazily loaded for
+     PDF, JSZip for Word/PowerPoint, FileReader for text) but keeps the
+     text in the chat's own state — the wizard's material is untouched.
+     JSON banks and spreadsheets are not material here: a bank has no
+     prose to answer from, and a sheet's rows are questions, not text. */
+  function extractPdfText(file) {
+    return loadPdfJs().then(function () {
+      return file.arrayBuffer();
+    }).then(function (buf) {
+      return window.pdfjsLib.getDocument({ data: buf }).promise;
+    }).then(function (pdf) {
+      var pageTexts = [];
+      var chain = Promise.resolve();
+      for (var p = 1; p <= pdf.numPages; p++) {
+        (function (pageNum) {
+          chain = chain.then(function () {
+            return pdf.getPage(pageNum).then(function (page) {
+              return page.getTextContent();
+            }).then(function (content) {
+              pageTexts[pageNum - 1] = content.items.map(function (it) { return it.str; }).join(' ');
+            });
+          });
+        })(p);
+      }
+      return chain.then(function () {
+        return { text: pageTexts.join('\n\n'), pages: pdf.numPages };
+      });
+    });
+  }
+
+  function chatRebuildText() {
+    if (!chatState) return;
+    var parts = chatState.files.map(function (f) { return f.text || ''; });
+    if (chatState.pasted) parts.push(chatState.pasted);
+    var joined = parts.join('\n\n');
+    chatState.truncated = joined.length > VARIANT_MATERIAL_MAX;
+    chatState.text = chatState.truncated ? joined.slice(0, VARIANT_MATERIAL_MAX) : joined;
+  }
+
+  function chatPushFile(meta, text) {
+    if (!chatState) return;
+    meta.text = text;
+    meta.chars = text.length;
+    chatState.files.push(meta);
+    chatState.readError = '';
+    chatRebuildText();
+  }
+
+  function chatAddOneFile(file) {
+    var name = file.name || 'file';
+    var lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) {
+      return extractPdfText(file).then(function (out) {
+        if (!out.text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
+        chatPushFile({ name: name, size: file.size, kind: 'pdf', pages: out.pages }, out.text);
+      }).catch(function (e) {
+        throw new Error(t('errReadFileDetail', { name: name, detail: e.message }));
+      });
+    }
+    if (lower.endsWith('.docx')) {
+      return loadOfficeZip(file).then(function (zip) {
+        return extractDocxText(zip, name);
+      }).then(function (text) {
+        if (!text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
+        chatPushFile({ name: name, size: file.size, kind: 'docx', pages: 0 }, text);
+      }).catch(function (e) {
+        throw new Error(t('errReadFileDetail', { name: name, detail: e.message }));
+      });
+    }
+    if (lower.endsWith('.pptx')) {
+      return loadOfficeZip(file).then(function (zip) {
+        return extractPptxText(zip, name);
+      }).then(function (out) {
+        if (!out.text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
+        chatPushFile({ name: name, size: file.size, kind: 'pptx', pages: out.slides }, out.text);
+      }).catch(function (e) {
+        throw new Error(t('errReadFileDetail', { name: name, detail: e.message }));
+      });
+    }
+    // .txt / .md / anything else readable as text
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var text = String(reader.result || '');
+        chatPushFile({ name: name, size: file.size, kind: 'text', pages: 0 }, text);
+        resolve();
+      };
+      reader.onerror = function () { reject(new Error(t('errReadFile', { name: name }))); };
+      reader.readAsText(file);
+    });
+  }
+
+  function chatAddFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length || !chatState) return;
+    var chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () { return chatAddOneFile(file); });
+    });
+    chain.then(function () {
+      chatRefreshMaterial();
+      showChatStatus(t('chatFileAdded', { name: files[files.length - 1].name, n: (chatState.files[chatState.files.length - 1] || {}).chars || 0 }), true);
+    }).catch(function (e) {
+      if (chatState) chatState.readError = e.message;
+      chatRefreshMaterial();
+      showChatStatus(e.message, false);
+    });
+  }
+
+  function chatRemoveFile(idx) {
+    if (!chatState) return;
+    chatState.files.splice(idx, 1);
+    chatRebuildText();
+    chatRefreshMaterial();
+  }
+
+  function chatRefreshMaterial() {
+    if (!chatState) return;
+    var list = document.getElementById('chat-file-list');
+    var summary = document.getElementById('chat-material-summary');
+    var src = document.getElementById('chat-source');
+    if (src) {
+      src.textContent = chatState.examId
+        ? t('chatSourceExam', { title: chatState.examTitle })
+        : t('chatSourceFresh');
+    }
+    if (list) {
+      list.innerHTML = '';
+      chatState.files.forEach(function (f, idx) {
+        var row = el('div', 'file-row');
+        row.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'docx' ? '📄' : (f.kind === 'pptx' ? '📽️' : '📝'))));
+        var meta = el('div', 'file-meta');
+        meta.appendChild(el('span', 'file-name', f.name));
+        var sub = f.kind === 'pdf'
+          ? fmtSize(f.size) + ' · ' + t('s1PagesLabel', { n: f.pages }) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() })
+          : f.kind === 'pptx'
+            ? fmtSize(f.size) + ' · ' + t('s1SlidesLabel', { n: f.pages }) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() })
+            : fmtSize(f.size) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() });
+        meta.appendChild(el('span', 'file-sub muted', sub));
+        row.appendChild(meta);
+        var rm = el('button', 'file-remove', '✕');
+        rm.type = 'button';
+        rm.title = t('chatRemoveFile');
+        rm.setAttribute('aria-label', t('chatRemoveAria', { name: f.name }));
+        rm.addEventListener('click', function () { chatRemoveFile(idx); });
+        row.appendChild(rm);
+        list.appendChild(row);
+      });
+    }
+    if (summary) {
+      var chars = (chatState.text || '').length;
+      var parts = chatState.files.length
+        ? t('chatMaterialChars', { n: chars.toLocaleString(), f: chatState.files.length })
+        : t('chatMaterialCharsNoFiles', { n: chars.toLocaleString() });
+      summary.textContent = chars > 0 ? parts : t('chatNoMaterial');
+      if (chatState.truncated) {
+        summary.textContent += ' ' + t('chatTooLong', { n: VARIANT_MATERIAL_MAX.toLocaleString() });
+      }
+      if (chatState.readError) {
+        var err = el('span', null, ' ' + chatState.readError);
+        summary.appendChild(err);
+      }
+    }
+  }
+
+  function showChatStatus(msg, ok) {
+    var box = document.getElementById('chat-error');
+    if (!box) return;
+    box.className = ok ? 'gen-success show' : 'bank-error show';
+    box.textContent = msg;
+  }
+
+  function showChatError(msg) {
+    showChatStatus(msg, false);
+  }
+
+  function renderChatMessages() {
+    if (!chatState) return;
+    var box = document.getElementById('chat-messages');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!chatState.messages.length) {
+      box.appendChild(el('p', 'muted', t('chatEmpty')));
+    }
+    chatState.messages.forEach(function (m) {
+      var wrap = el('div', 'chat-msg ' + (m.role === 'user' ? 'chat-user' : 'chat-assistant'));
+      wrap.appendChild(el('span', 'chat-who', m.role === 'user' ? t('chatYou') : t('chatAssistant')));
+      wrap.appendChild(el('p', null, m.text));
+      if (m.role === 'assistant' && m.quotes && m.quotes.length) {
+        wrap.appendChild(el('p', 'chat-quotes-label', t('chatQuotes')));
+        m.quotes.forEach(function (q) {
+          var bq = document.createElement('blockquote');
+          bq.className = 'chat-quote';
+          bq.textContent = q;
+          wrap.appendChild(bq);
+        });
+      }
+      box.appendChild(wrap);
+    });
+    if (chatState.busy) {
+      var th = el('div', 'chat-msg chat-assistant');
+      th.appendChild(el('span', 'chat-who', t('chatAssistant')));
+      th.appendChild(el('p', 'chat-thinking', t('chatThinking')));
+      box.appendChild(th);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function setChatBusy(on) {
+    var input = document.getElementById('chat-input');
+    var send = document.getElementById('chat-send');
+    if (input) input.disabled = on;
+    if (send) {
+      send.disabled = on;
+      send.textContent = on ? t('chatThinking') : t('chatSend');
+    }
+    renderChatMessages();
+  }
+
+  function askChat() {
+    if (!chatState || chatState.busy) return;
+    var input = document.getElementById('chat-input');
+    var q = (input ? input.value : chatState.draft || '').trim();
+    if (!q) return;
+    var errBox = document.getElementById('chat-error');
+    if (errBox) errBox.classList.remove('show');
+    if (isOffline()) { showChatError(t('offlineNeedNet')); return; }
+    if (!byok.apiKey) { showChatError(t('chatNoKey')); return; }
+    var materialText = (chatState.text || '').trim();
+    if (!materialText) { showChatError(t('chatNoMaterial')); return; }
+    chatState.busy = true;
+    chatState.messages.push({ role: 'user', text: q });
+    chatState.draft = '';
+    if (input) input.value = '';
+    saveChatHistory();
+    setChatBusy(true);
+    /* History for follow-ups: the exchanges before this question,
+       capped so the prompt stays bounded. */
+    var history = chatState.messages.slice(-7, -1);
+    var chunks = pickChatChunks(materialText, q);
+    callProvider(buildChatPrompt(q, chunks, history), 1, 'chat').then(function (raw) {
+      var res = parseChatResponse(raw);
+      chatState.messages.push({ role: 'assistant', text: res.answer, quotes: res.quotes });
+      chatState.busy = false;
+      saveChatHistory();
+      setChatBusy(false);
+    }).catch(function (e) {
+      chatState.busy = false;
+      /* The question stays in the history — it was asked, and the
+         student can re-send it after fixing the key or connection
+         without losing what they asked. */
+      setChatBusy(false);
+      showChatError(plainError(e));
+    });
+  }
+
+  function renderChat() {
+    if (!chatState) return;
+    app.innerHTML = '';
+    var wrap = el('div');
+    var card = el('section', 'card chat-card');
+    card.appendChild(el('p', 'kicker', t('chatKicker')));
+    card.appendChild(el('h2', null, t('chatTitle')));
+    card.appendChild(el('p', 'hero-text', t('chatHero')));
+    var src = el('p', 'muted');
+    src.id = 'chat-source';
+    card.appendChild(src);
+    if (!byok.apiKey) {
+      var noKey = el('p', 'bank-error show');
+      noKey.id = 'chat-nokey';
+      noKey.textContent = t('chatNoKey');
+      card.appendChild(noKey);
+    }
+
+    /* Material: files uploaded here, plus paste. For an exam chat
+       the exam's material is already the text; files added here
+       extend it. */
+    var matBox = el('div', 'chat-material');
+    var list = el('div', 'file-list');
+    list.id = 'chat-file-list';
+    matBox.appendChild(list);
+    var upLbl = el('label', 'file-label', t('chatUploadBtn'));
+    var picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.pdf,.docx,.pptx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation,text/plain,text/markdown';
+    picker.multiple = true;
+    picker.addEventListener('change', function () {
+      if (picker.files && picker.files.length) chatAddFiles(picker.files);
+      picker.value = '';
+    });
+    upLbl.appendChild(picker);
+    matBox.appendChild(upLbl);
+    matBox.appendChild(el('p', 'field-hint', t('chatUploadHint')));
+    var pasteLabel = el('label', 'field-label', t('chatPasteLabel'));
+    pasteLabel.htmlFor = 'chat-paste';
+    matBox.appendChild(pasteLabel);
+    var ta = document.createElement('textarea');
+    ta.id = 'chat-paste';
+    ta.className = 'input textarea';
+    ta.rows = 3;
+    ta.placeholder = t('chatPastePh');
+    matBox.appendChild(ta);
+    var pasteRow = el('div', 'btnrow');
+    var addPaste = el('button', 'btn btn-secondary btn-small', t('chatAddPaste'));
+    addPaste.type = 'button';
+    addPaste.addEventListener('click', function () {
+      var v = ta.value.trim();
+      if (!v) { showChatError(t('chatPasteEmpty')); return; }
+      chatState.pasted = (chatState.pasted ? chatState.pasted + '\n\n' : '') + v;
+      ta.value = '';
+      chatRebuildText();
+      chatRefreshMaterial();
+      showChatStatus(t('chatPasteAdded', { n: v.length.toLocaleString() }), true);
+    });
+    pasteRow.appendChild(addPaste);
+    matBox.appendChild(pasteRow);
+    var summary = el('p', 'material-summary');
+    summary.id = 'chat-material-summary';
+    matBox.appendChild(summary);
+    card.appendChild(matBox);
+
+    var msgs = el('div', 'chat-messages');
+    msgs.id = 'chat-messages';
+    card.appendChild(msgs);
+
+    var errBox = el('div', 'bank-error');
+    errBox.id = 'chat-error';
+    card.appendChild(errBox);
+
+    var inputRow = el('div', 'chat-input-row');
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'chat-input';
+    input.className = 'input';
+    input.placeholder = t('chatInputPh');
+    input.setAttribute('aria-label', t('chatInputPh'));
+    input.value = chatState.draft || '';
+    input.addEventListener('input', function () { chatState.draft = input.value; });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); askChat(); }
+    });
+    inputRow.appendChild(input);
+    var send = el('button', 'btn btn-primary', t('chatSend'));
+    send.id = 'chat-send';
+    send.type = 'button';
+    send.addEventListener('click', function () { askChat(); });
+    inputRow.appendChild(send);
+    card.appendChild(inputRow);
+
+    var row = el('div', 'btnrow');
+    var back = el('button', 'btn btn-secondary btn-big', t('chatBack'));
+    back.id = 'chat-back-btn';
+    back.addEventListener('click', function () { setView('library'); });
+    row.appendChild(back);
+    var clear = el('button', 'btn btn-secondary btn-big', t('chatClear'));
+    clear.id = 'chat-clear-btn';
+    clear.addEventListener('click', function () {
+      if (!chatState) return;
+      chatState.messages = [];
+      saveChatHistory();
+      renderChatMessages();
+      showChatStatus(t('chatCleared'), true);
+    });
+    row.appendChild(clear);
+    card.appendChild(row);
+
+    wrap.appendChild(card);
+    app.appendChild(wrap);
+    chatRefreshMaterial();
+    renderChatMessages();
+    if (chatState.busy) setChatBusy(true);
+  }
+
+  /* Test/debug handle (like window.__qfSheet / __qfBackup): the pure
+     chat pieces for the headless smoke test. */
+  window.__qfChat = {
+    openChat: openChat,
+    pickChatChunks: pickChatChunks,
+    parseChatResponse: parseChatResponse,
+    buildChatPrompt: buildChatPrompt,
+    state: function () { return chatState; }
+  };
+
+  /* ---------- past-exam analysis (Feature 2 of the new queue, 2026-11-22)
+     Upload 2+ past exams, each labelled with a year. Each exam's topics
+     are extracted with the student's own provider (same BYOK key as
+     generation), then a second provider pass merges topics that are the
+     same idea in different wording into one canonical topic. Frequency
+     is plain counting on the merged result — never a local guess at
+     topics. The focused-exam button hands the wizard the past exams as
+     material and the top topics as focus notes, opening the settings
+     step so the student can check count / difficulty / language before
+     generating. No key, or offline: a plain message, nothing analysed,
+     never a fake analysis. Adding or removing an exam after an
+     analysis clears the result, so the table can never describe exams
+     that are no longer there. */
+  var PAST_TOPIC_MAX_CHARS = 12000; // one chunk per exam is enough to list its topics
+  var PAST_TOP_FOCUS = 8;           // most top topics carried into the focus notes
+  var pastState = null;             // {exams: [{name,size,kind,year,text,chars,pages}], busy, progress, error, result}
+
+  function openPastAnalysis() {
+    pastState = { exams: [], busy: false, progress: '', error: '', result: null };
+    currentView = 'past';
+    document.getElementById('nav-create').classList.remove('active');
+    document.getElementById('nav-library').classList.remove('active');
+    document.getElementById('nav-stats').classList.remove('active');
+    renderPast();
+    window.scrollTo({ top: 0 });
+  }
+
+  function pastPushFile(meta, text) {
+    if (!pastState) return;
+    meta.text = text;
+    meta.chars = text.length;
+    meta.year = '';
+    pastState.exams.push(meta);
+    pastState.error = '';
+    pastState.result = null; // new file invalidates the old analysis
+  }
+
+  /* Same readers as the chat screen (worker 1): pdf.js lazily loaded
+     for PDF, JSZip for Word, FileReader for text. PowerPoint is not
+     offered here — a past exam is a PDF, a Word file or plain text. */
+  function pastAddOneFile(file) {
+    var name = file.name || 'file';
+    var lower = name.toLowerCase();
+    if (lower.endsWith('.pdf')) {
+      return extractPdfText(file).then(function (out) {
+        if (!out.text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
+        pastPushFile({ name: name, size: file.size, kind: 'pdf', pages: out.pages }, out.text);
+      }).catch(function (e) {
+        throw new Error(t('errReadFileDetail', { name: name, detail: e.message }));
+      });
+    }
+    if (lower.endsWith('.docx')) {
+      return loadOfficeZip(file).then(function (zip) {
+        return extractDocxText(zip, name);
+      }).then(function (text) {
+        if (!text.trim()) throw new Error(t('errOfficeNoText', { name: name }));
+        pastPushFile({ name: name, size: file.size, kind: 'docx', pages: 0 }, text);
+      }).catch(function (e) {
+        throw new Error(t('errReadFileDetail', { name: name, detail: e.message }));
+      });
+    }
+    // .txt / .md / anything else readable as text
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        pastPushFile({ name: name, size: file.size, kind: 'text', pages: 0 }, String(reader.result || ''));
+        resolve();
+      };
+      reader.onerror = function () { reject(new Error(t('errReadFile', { name: name }))); };
+      reader.readAsText(file);
+    });
+  }
+
+  function pastAddFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length || !pastState) return;
+    var chain = Promise.resolve();
+    files.forEach(function (file) {
+      chain = chain.then(function () { return pastAddOneFile(file); });
+    });
+    chain.then(function () {
+      pastRefreshExams();
+      showPastStatus(t('pastFileAdded', { name: files[files.length - 1].name, n: (pastState.exams[pastState.exams.length - 1] || {}).chars || 0 }), true);
+    }).catch(function (e) {
+      if (pastState) pastState.error = e.message;
+      pastRefreshExams();
+      showPastStatus(e.message, false);
+    });
+  }
+
+  function pastRemoveExam(idx) {
+    if (!pastState) return;
+    pastState.exams.splice(idx, 1);
+    pastState.result = null;
+    pastRefreshExams();
+  }
+
+  function buildTopicPrompt(examText, label) {
+    return 'You are a study assistant. List the main topics covered in this past exam' +
+      (label ? ' (' + label + ')' : '') + '. ' +
+      'Use short canonical topic names (2–6 words each), in the same language as the exam. ' +
+      'List 3–12 topics — the big ideas the exam actually tests, not every small detail. ' +
+      'Reply with JSON ONLY — no markdown fences, no extra text. The JSON must be an object with ' +
+      '"topics" (an array of objects with "name" — the short topic name — and "description" — one short sentence saying what the topic covers).\n\nEXAM:\n' + examText;
+  }
+
+  function parseTopicResponse(raw) {
+    var text = String(raw || '').trim();
+    if (!text) throw new Error(t('errEmptyReply', { who: PROVIDERS[byok.provider].label }));
+    var data;
+    try { data = JSON.parse(extractJsonText(text)); }
+    catch (e) { throw new Error(t('pastBadReply')); }
+    var topics = Array.isArray(data && data.topics) ? data.topics : [];
+    topics = topics.filter(function (tp) {
+      return tp && typeof tp.name === 'string' && tp.name.trim();
+    }).map(function (tp) {
+      return { name: tp.name.trim(), description: typeof tp.description === 'string' ? tp.description.trim() : '' };
+    });
+    if (!topics.length) throw new Error(t('pastNoTopics'));
+    return topics;
+  }
+
+  /* Second pass: merge topics that are the same idea in different
+     wording into one canonical topic, keeping the exam numbers each
+     merged topic appears in. */
+  function buildMergePrompt(perExam) {
+    var lines = [];
+    perExam.forEach(function (ex, i) {
+      lines.push('Exam ' + (i + 1) + (ex.year ? ' (' + ex.year + ')' : '') + ': ' +
+        ex.topics.map(function (tp) {
+          return tp.name + (tp.description ? ' — ' + tp.description : '');
+        }).join(' | '));
+    });
+    return 'You are a study assistant. Below are the topic lists extracted from several past exams of the same course. ' +
+      'Some topics are the same idea written in different words — merge those into ONE topic with the clearest name. ' +
+      'Topics that are genuinely different stay separate. ' +
+      'Reply with JSON ONLY — no markdown fences, no extra text. The JSON must be an object with "topics" (an array of objects with "name" — the merged topic name — "description" — one short sentence — and "exams" — the list of exam numbers (1-based) where this topic appears, e.g. [1, 3]).\n\n' + lines.join('\n');
+  }
+
+  function parseMergeResponse(raw, nExams) {
+    var text = String(raw || '').trim();
+    if (!text) throw new Error(t('errEmptyReply', { who: PROVIDERS[byok.provider].label }));
+    var data;
+    try { data = JSON.parse(extractJsonText(text)); }
+    catch (e) { throw new Error(t('pastBadReply')); }
+    var topics = Array.isArray(data && data.topics) ? data.topics : [];
+    var out = [];
+    topics.forEach(function (tp) {
+      if (!tp || typeof tp.name !== 'string' || !tp.name.trim()) return;
+      var exams = Array.isArray(tp.exams) ? tp.exams.filter(function (n) {
+        return typeof n === 'number' && n >= 1 && n <= nExams;
+      }) : [];
+      if (!exams.length) return;
+      out.push({
+        name: tp.name.trim(),
+        description: typeof tp.description === 'string' ? tp.description.trim() : '',
+        exams: exams
+      });
+    });
+    if (!out.length) throw new Error(t('pastNoTopics'));
+    return out;
+  }
+
+  /* Pure merge used when the provider merge pass fails: same name
+     (case-insensitive, trimmed) in different exams is one topic. It
+     only joins identical names — it never guesses that two different
+     wordings are the same idea, so a failed merge pass degrades to
+     exact matching instead of a fake analysis. */
+  function mergeTopicsLocal(perExam) {
+    var byName = {};
+    var order = [];
+    perExam.forEach(function (ex, i) {
+      ex.topics.forEach(function (tp) {
+        var k = tp.name.trim().toLowerCase();
+        if (!byName[k]) {
+          byName[k] = { name: tp.name.trim(), description: tp.description || '', exams: [] };
+          order.push(k);
+        }
+        if (byName[k].exams.indexOf(i + 1) === -1) byName[k].exams.push(i + 1);
+      });
+    });
+    return order.map(function (k) { return byName[k]; });
+  }
+
+  /* Frequency is plain counting on the merged result: how many exams
+     each topic appears in, and which years. Most-repeated first; ties
+     break alphabetically so the order is stable. */
+  function computeFrequency(merged, exams) {
+    var n = exams.length;
+    var rows = merged.map(function (tp) {
+      var years = [];
+      tp.exams.forEach(function (num) {
+        var y = (exams[num - 1].year || '').trim();
+        if (y && years.indexOf(y) === -1) years.push(y);
+      });
+      return {
+        name: tp.name,
+        description: tp.description || '',
+        count: tp.exams.length,
+        total: n,
+        years: years
+      };
+    });
+    rows.sort(function (a, b) {
+      return b.count - a.count || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    });
+    return rows;
+  }
+
+  function analysePastExams() {
+    if (!pastState || pastState.busy) return;
+    var errBox = document.getElementById('past-error');
+    if (errBox) errBox.classList.remove('show');
+    if (isOffline()) { showPastStatus(t('offlineNeedNet'), false); return; }
+    if (!byok.apiKey) { showPastStatus(t('pastNoKey'), false); return; }
+    var exams = pastState.exams.filter(function (e) { return (e.text || '').trim(); });
+    if (exams.length < 2) { showPastStatus(t('pastNeedTwo'), false); return; }
+    pastState.busy = true;
+    pastState.error = '';
+    var prog = document.getElementById('past-progress');
+    var btn = document.getElementById('past-analyse-btn');
+    if (btn) btn.disabled = true;
+    var perExam = [];
+    var chain = Promise.resolve();
+    exams.forEach(function (ex, i) {
+      chain = chain.then(function () {
+        pastState.progress = t('pastAnalysing', { i: i + 1, n: exams.length });
+        if (prog) prog.textContent = pastState.progress;
+        var label = ex.year ? ('year ' + ex.year) : ('exam ' + (i + 1));
+        return callProvider(buildTopicPrompt(ex.text.slice(0, PAST_TOPIC_MAX_CHARS), label), 1, 'past');
+      }).then(function (raw) {
+        perExam.push({ year: ex.year || '', topics: parseTopicResponse(raw) });
+      });
+    });
+    chain.then(function () {
+      pastState.progress = t('pastMerging');
+      if (prog) prog.textContent = pastState.progress;
+      return callProvider(buildMergePrompt(perExam), 1, 'past')
+        .then(function (raw) { return parseMergeResponse(raw, exams.length); })
+        .catch(function () { return mergeTopicsLocal(perExam); });
+    }).then(function (merged) {
+      pastState.result = { rows: computeFrequency(merged, exams), examCount: exams.length };
+      pastState.busy = false;
+      pastState.progress = '';
+      if (prog) prog.textContent = '';
+      if (btn) btn.disabled = false;
+      renderPast();
+      showPastStatus(t('pastAnalysedNote', { n: exams.length }), true);
+    }).catch(function (e) {
+      pastState.busy = false;
+      pastState.progress = '';
+      if (prog) prog.textContent = '';
+      if (btn) btn.disabled = false;
+      showPastStatus(plainError(e), false);
+    });
+  }
+
+  /* Focused exam: the past exams become the wizard's material and the
+     most-repeated topics become its focus notes, then the wizard opens
+     on the settings step so the student checks count / difficulty /
+     language before generating. Topics that appeared in at least 2
+     exams lead; if every topic appeared only once, the top 5 by rank
+     lead instead. */
+  function pastGenerateFocused() {
+    if (!pastState || !pastState.result) return;
+    var rows = pastState.result.rows;
+    var top = rows.filter(function (r) { return r.count >= 2; }).slice(0, PAST_TOP_FOCUS);
+    if (!top.length) top = rows.slice(0, Math.min(5, rows.length));
+    var focusLines = top.map(function (r, i) {
+      return (i + 1) + '. ' + r.name + ' (appeared in ' + r.count + ' of ' + r.total + ' past exams' +
+        (r.years.length ? ', years: ' + r.years.join(', ') : '') + ')' +
+        (r.description ? ' — ' + r.description : '');
+    });
+    var fullText = pastState.exams.map(function (e) { return e.text || ''; }).join('\n\n').trim();
+    material.files = [];
+    material.text = fullText.length <= VARIANT_MATERIAL_MAX ? fullText : fullText.slice(0, VARIANT_MATERIAL_MAX);
+    material.pasted = '';
+    material.pdfPages = 0;
+    material.pptxSlides = 0;
+    material.pdfFailed = false;
+    material.readError = '';
+    sumState.data = null; // the old summary describes other material
+    wiz.title = t('pastGenTitle');
+    wiz.focus = t('pastFocusNotes', { n: top.length }) + ' ' + focusLines.join(' ');
+    wiz.step = 3;
+    saveWizard();
+    setView('create');
+  }
+
+  function showPastStatus(msg, ok) {
+    var box = document.getElementById('past-error');
+    if (!box) return;
+    box.className = ok ? 'gen-success show' : 'bank-error show';
+    box.textContent = msg;
+  }
+
+  function pastRefreshExams() {
+    if (!pastState) return;
+    var list = document.getElementById('past-file-list');
+    var summary = document.getElementById('past-summary');
+    if (list) {
+      list.innerHTML = '';
+      pastState.exams.forEach(function (f, idx) {
+        var rowEl = el('div', 'file-row past-row');
+        rowEl.appendChild(el('span', 'file-ic', f.kind === 'pdf' ? '📕' : (f.kind === 'docx' ? '📄' : '📝')));
+        var meta = el('div', 'file-meta');
+        meta.appendChild(el('span', 'file-name', f.name));
+        meta.appendChild(el('span', 'file-sub muted', fmtSize(f.size) + ' · ' + t('s1CharsLabel', { n: f.chars.toLocaleString() })));
+        rowEl.appendChild(meta);
+        var year = document.createElement('input');
+        year.type = 'text';
+        year.className = 'input past-year';
+        year.placeholder = t('pastYearPh');
+        year.value = f.year || '';
+        year.setAttribute('aria-label', t('pastYearAria', { name: f.name }));
+        year.addEventListener('input', function () { f.year = year.value; });
+        rowEl.appendChild(year);
+        var rm = el('button', 'file-remove', '✕');
+        rm.type = 'button';
+        rm.title = t('pastRemoveFile');
+        rm.setAttribute('aria-label', t('pastRemoveAria', { name: f.name }));
+        rm.addEventListener('click', function () { pastRemoveExam(idx); });
+        rowEl.appendChild(rm);
+        list.appendChild(rowEl);
+      });
+    }
+    if (summary) {
+      summary.textContent = pastState.exams.length
+        ? t('pastExamsLabel', { n: pastState.exams.length })
+        : t('pastNoExams');
+    }
+    pastRenderResults();
+  }
+
+  function pastRenderResults() {
+    var box = document.getElementById('past-results');
+    if (!box || !pastState) return;
+    box.innerHTML = '';
+    var res = pastState.result;
+    if (!res) return;
+    box.appendChild(el('h3', 'past-res-title', t('pastResultsTitle')));
+    box.appendChild(el('p', 'muted', t('pastResultsHero', { n: res.examCount })));
+    var rank = el('ol', 'past-rank');
+    res.rows.forEach(function (r) {
+      var li = el('li', 'past-rank-row');
+      li.appendChild(el('span', 'past-count', t('pastInExams', { c: r.count, n: r.total })));
+      var body = el('div', 'past-rank-body');
+      body.appendChild(el('span', 'past-topic', r.name));
+      if (r.description) body.appendChild(el('span', 'past-desc muted', r.description));
+      body.appendChild(el('span', 'past-years muted', r.years.length ? t('pastYears', { y: r.years.join(', ') }) : t('pastNoYear')));
+      li.appendChild(body);
+      rank.appendChild(li);
+    });
+    box.appendChild(rank);
+    var genBtn = el('button', 'btn btn-primary btn-big', t('pastGenBtn'));
+    genBtn.id = 'past-gen-btn';
+    genBtn.type = 'button';
+    genBtn.addEventListener('click', function () { pastGenerateFocused(); });
+    box.appendChild(genBtn);
+    box.appendChild(el('p', 'field-hint', t('pastGenNote')));
+  }
+
+  function renderPast() {
+    if (!pastState) return;
+    app.innerHTML = '';
+    var wrap = el('div');
+    var card = el('section', 'card past-card');
+    card.appendChild(el('p', 'kicker', t('pastKicker')));
+    card.appendChild(el('h2', null, t('pastTitle')));
+    card.appendChild(el('p', 'hero-text', t('pastHero')));
+    if (!byok.apiKey) {
+      var noKey = el('p', 'bank-error show');
+      noKey.id = 'past-nokey';
+      noKey.textContent = t('pastNoKey');
+      card.appendChild(noKey);
+    }
+
+    var list = el('div', 'file-list');
+    list.id = 'past-file-list';
+    card.appendChild(list);
+    var upLbl = el('label', 'file-label', t('pastUploadBtn'));
+    var picker = document.createElement('input');
+    picker.type = 'file';
+    picker.accept = '.pdf,.docx,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown';
+    picker.multiple = true;
+    picker.addEventListener('change', function () {
+      if (picker.files && picker.files.length) pastAddFiles(picker.files);
+      picker.value = '';
+    });
+    upLbl.appendChild(picker);
+    card.appendChild(upLbl);
+    card.appendChild(el('p', 'field-hint', t('pastUploadHint')));
+    var summary = el('p', 'material-summary');
+    summary.id = 'past-summary';
+    card.appendChild(summary);
+
+    var row = el('div', 'btnrow');
+    var analyseBtn = el('button', 'btn btn-primary btn-big', t('pastAnalyseBtn'));
+    analyseBtn.id = 'past-analyse-btn';
+    analyseBtn.type = 'button';
+    if (pastState.busy) analyseBtn.disabled = true;
+    analyseBtn.addEventListener('click', function () { analysePastExams(); });
+    row.appendChild(analyseBtn);
+    card.appendChild(row);
+    var prog = el('p', 'gen-progress');
+    prog.id = 'past-progress';
+    if (pastState.busy) prog.textContent = pastState.progress;
+    card.appendChild(prog);
+    var errBox = el('div', 'bank-error');
+    errBox.id = 'past-error';
+    card.appendChild(errBox);
+
+    var resBox = el('div');
+    resBox.id = 'past-results';
+    card.appendChild(resBox);
+
+    var brow = el('div', 'btnrow');
+    var back = el('button', 'btn btn-secondary btn-big', t('pastBack'));
+    back.id = 'past-back-btn';
+    back.addEventListener('click', function () { setView('library'); });
+    brow.appendChild(back);
+    var clear = el('button', 'btn btn-secondary btn-big', t('pastClear'));
+    clear.id = 'past-clear-btn';
+    clear.addEventListener('click', function () {
+      if (!pastState) return;
+      pastState.exams = [];
+      pastState.result = null;
+      renderPast();
+      showPastStatus(t('pastCleared'), true);
+    });
+    brow.appendChild(clear);
+    card.appendChild(brow);
+
+    wrap.appendChild(card);
+    app.appendChild(wrap);
+    pastRefreshExams();
+  }
+
+  /* Test/debug handle (like window.__qfChat): the pure past-exam
+     pieces for the headless smoke test. */
+  window.__qfPast = {
+    openPastAnalysis: openPastAnalysis,
+    buildTopicPrompt: buildTopicPrompt,
+    parseTopicResponse: parseTopicResponse,
+    buildMergePrompt: buildMergePrompt,
+    parseMergeResponse: parseMergeResponse,
+    mergeTopicsLocal: mergeTopicsLocal,
+    computeFrequency: computeFrequency,
+    state: function () { return pastState; }
+  };
+
   /* ---------- library (My exams) ---------- */
 
   function renderLibrary() {
@@ -3310,6 +4663,18 @@
     var createBtn = el('button', 'btn btn-primary', t('libCreate'));
     createBtn.addEventListener('click', function () { setView('create'); });
     row.appendChild(createBtn);
+    /* Chat with the material (Feature 1, 2026-11-22): a fresh chat
+       with no exam — the student uploads or pastes material here. */
+    var chatFreshBtn = el('button', 'btn btn-secondary', t('chatBtnFresh'));
+    chatFreshBtn.id = 'chat-fresh-btn';
+    chatFreshBtn.addEventListener('click', function () { openChat(null); });
+    row.appendChild(chatFreshBtn);
+    /* Past-exam analysis (Feature 2, 2026-11-22): which topics repeat
+       across years, then a focused exam on the most-repeated ones. */
+    var pastBtn = el('button', 'btn btn-secondary', t('pastBtn'));
+    pastBtn.id = 'past-btn';
+    pastBtn.addEventListener('click', function () { openPastAnalysis(); });
+    row.appendChild(pastBtn);
     var impLbl = el('label', 'file-label', t('libImport'));
     var impInput = document.createElement('input');
     impInput.type = 'file';
@@ -3379,6 +4744,22 @@
       card.appendChild(el('p', 'muted',
         t('qCount', { n: entry.count }) + ' · ' + entry.date +
         (entry.provider && entry.provider !== 'import' && entry.provider !== 'shared' ? ' · ' + entry.provider + (entry.model ? ' (' + entry.model + ')' : '') : ' · ' + t('libImported'))));
+      /* Generate from a link (2026-11-22): show where the questions
+         came from. The href is only used for http(s) URLs. */
+      if (entry.sourceUrl && /^https?:\/\//i.test(entry.sourceUrl)) {
+        var srcLine = el('p', 'muted lib-source');
+        srcLine.appendChild(document.createTextNode(t('libSource') + ' '));
+        var srcLink = document.createElement('a');
+        srcLink.href = entry.sourceUrl;
+        srcLink.target = '_blank';
+        srcLink.rel = 'noopener';
+        srcLink.title = entry.sourceUrl;
+        srcLink.textContent = entry.sourceUrl.length > 60
+          ? entry.sourceUrl.slice(0, 60) + '…'
+          : entry.sourceUrl;
+        srcLine.appendChild(srcLink);
+        card.appendChild(srcLine);
+      }
       var r = el('div', 'btnrow');
       var take = el('button', 'btn btn-primary', t('libTake'));
       take.addEventListener('click', function () { loadBank(entry.bank); });
@@ -3402,6 +4783,12 @@
          demo ones do not. */
       var vErr = el('div', 'bank-error');
       if (entry.material && entry.material.trim()) {
+        /* Chat with the material (Feature 1, 2026-11-22): only for
+           exams that still carry their source material — generated
+           exams do, imported / shared / demo ones do not. */
+        var chatBtn = el('button', 'btn btn-secondary', t('chatBtn'));
+        chatBtn.addEventListener('click', function () { openChat(entry); });
+        r.appendChild(chatBtn);
         var varBtn = el('button', 'btn btn-secondary', t('variantBtn'));
         varBtn.addEventListener('click', function () { generateVariant(entry, varBtn, vErr); });
         r.appendChild(varBtn);
@@ -3427,6 +4814,7 @@
       var errBox = document.getElementById('import-error');
       try {
         var data = JSON.parse(String(reader.result || ''));
+        repairTfQuestions(data);
         validate(data);
         var lib = loadLibrary();
         lib.unshift({
@@ -3701,7 +5089,7 @@
       } else {
         var opts = el('ol', 'print-opts');
         q.options.forEach(function (optText, idx) {
-          opts.appendChild(el('li', null, LETTERS[idx] + ') ' + optText));
+          opts.appendChild(el('li', null, LETTERS[idx] + ') ' + (qt === 'tf' ? tfDisplayText(optText) : optText)));
         });
         item.appendChild(opts);
       }
@@ -3735,9 +5123,11 @@
           (q.items || []).map(function (s, idx) { return (idx + 1) + '. ' + s; }).join(' · ')));
       } else {
         row.appendChild(el('div', 'print-keyans',
-          (i + 1) + '. ' + LETTERS[q.answer] + ') ' + q.options[q.answer]));
+          (i + 1) + '. ' + LETTERS[q.answer] + ') ' + (qt === 'tf' ? tfDisplayText(q.options[q.answer]) : q.options[q.answer])));
       }
-      if (q.explanation) {
+      if (qt === 'tf' && tfJustification(q)) {
+        row.appendChild(el('div', 'print-keywhy', t('tfJustification') + tfJustification(q)));
+      } else if (q.explanation) {
         row.appendChild(el('div', 'print-keywhy', t('printWhy') + q.explanation));
       }
       key.appendChild(row);
@@ -3851,6 +5241,318 @@
     window.print();
   }
 
+  /* ---------- cheat sheet from mistakes (2026-11-22) ----------
+     One printable page covering EXACTLY the concepts behind the
+     questions the student got wrong — nothing else. Two sources:
+     - With a key: the provider condenses the missed questions
+       (same BYOK callProvider flow as the material summary). The
+       reply must come back with exactly one item per missed
+       question, in the same order — anything else is rejected, so
+       the sheet can never cover a concept the student did not miss.
+     - Without a key: the sheet is built from the stored
+       explanations of the missed questions, verbatim (question +
+       correct answer + its explanation, trimmed to short lines).
+       Nothing is invented and no fake AI summary is claimed.
+     The sheet is stored on the attempt record (LS_STATS) and on the
+     live run, so it can be reopened later from Stats without
+     regenerating. It prints through the same hidden #print-sheet +
+     window.print() approach as the exam, black-on-white in any mode. */
+  var cheatState = { sheet: null, returnTo: 'results', busy: false, error: '' };
+  var CHEAT_EXPL_MAX = 320;   // verbatim explanation cap, per missed question
+
+  function cheatTrim(s, max) {
+    var str = String(s || '').trim().replace(/\s+/g, ' ');
+    if (str.length <= max) return str;
+    return str.slice(0, max).replace(/\s+\S*$/, '').trim() + '…';
+  }
+
+  /* The missed questions of the current run, with the student's
+     answer and the correct answer rendered the same way the results
+     review renders them (shuffled option order, TF labels in the UI
+     language, matching pairs / ordering / fill / essay / coding). */
+  function cheatWrongEntries() {
+    if (!run || !quiz || !Array.isArray(run.qIndexes)) return [];
+    var entries = [];
+    run.qIndexes.forEach(function (qi, pos) {
+      var a = run.answers[pos];
+      if (a && a.correct) return;
+      var q = quiz.questions[qi];
+      if (!q) return;
+      var opts = run.optOrders[pos] || [];
+      var qt = qType(q);
+      var correctIdx = opts.findIndex(function (o) { return o.correct; });
+      var yours = (a && a.picked !== null && a.picked !== undefined && opts[a.picked])
+        ? opts[a.picked].text : null;
+      if (qt === 'tf' && yours !== null) yours = tfDisplayText(yours);
+      var correctText = '';
+      if (qt === 'mcq' || qt === 'tf') {
+        correctText = correctIdx >= 0 && opts[correctIdx]
+          ? LETTERS[correctIdx] + ') ' + tfDisplayText(opts[correctIdx].text) : '';
+      } else if (qt === 'fill') {
+        correctText = (q.answers || []).join(', ');
+      } else if (qt === 'essay') {
+        correctText = (q.rubric || (a && a.feedback) || '').trim();
+      } else if (qt === 'matching') {
+        correctText = (q.pairs || []).map(function (p) { return p.left + ' → ' + p.right; }).join(' · ');
+      } else if (qt === 'ordering') {
+        correctText = (q.items || []).map(function (s, i) { return (i + 1) + '. ' + s; }).join(' · ');
+      } else if (qt === 'coding') {
+        correctText = (q.tests || []).map(function (tc) { return tc.input + ' → ' + tc.expected; }).join(' · ');
+      }
+      entries.push({
+        question: q.question || '',
+        topic: (q.topic || 'General'),
+        yourAnswer: yours !== null ? yours : ((a && a.text) ? a.text : null),
+        correctAnswer: correctText,
+        explanation: qt === 'tf' ? tfJustification(q) : (q.explanation || '')
+      });
+    });
+    return entries;
+  }
+
+  /* No-key sheet: the concept heading is the question's topic (or
+     the question itself when there is no useful topic), and the
+     points are the correct answer plus the stored explanation,
+     verbatim — trimmed, never rewritten. */
+  function buildLocalCheatSheet(entries) {
+    return {
+      source: 'local',
+      lang: wiz.language || 'English',
+      generatedAt: Date.now(),
+      title: quiz ? (quiz.title || t('quizDefaultTitle')) : t('quizDefaultTitle'),
+      items: entries.map(function (e) {
+        var points = [];
+        if (e.correctAnswer) points.push(t('cheatCorrect') + e.correctAnswer);
+        if (e.explanation) points.push(cheatTrim(e.explanation, CHEAT_EXPL_MAX));
+        if (!points.length) points.push(cheatTrim(e.question, CHEAT_EXPL_MAX));
+        return {
+          concept: (e.topic && e.topic !== 'General') ? e.topic : cheatTrim(e.question, 80),
+          points: points,
+          question: e.question,
+          yourAnswer: e.yourAnswer,
+          correctAnswer: e.correctAnswer
+        };
+      })
+    };
+  }
+
+  function buildCheatPrompt(entries, lang) {
+    var lines = entries.map(function (e, i) {
+      return (i + 1) + '. QUESTION: ' + e.question +
+        '\n   STUDENT ANSWER: ' + (e.yourAnswer === null ? '(no answer)' : e.yourAnswer) +
+        '\n   CORRECT ANSWER: ' + (e.correctAnswer || '(see explanation)') +
+        '\n   EXPLANATION: ' + (e.explanation || '(none)');
+    }).join('\n\n');
+    return 'You are a study assistant. The student got exactly the ' +
+      entries.length + ' question(s) below wrong. Build a tight one-page cheat sheet ' +
+      'in ' + lang + ' covering ONLY the concepts behind THESE questions — nothing else, ' +
+      'no extra topics, no general advice. Reply with JSON ONLY — no markdown ' +
+      'fences, no extra text. The JSON must be an object with "items": an array of ' +
+      'exactly ' + entries.length + ' objects, in the same order as the questions, ' +
+      'each with "concept" (a short heading naming the concept) and "points" ' +
+      '(an array of 1–3 short lines: the correct fact, formula or definition, ' +
+      'each under 25 words). Base everything ONLY on the questions below — do not ' +
+      'invent facts.\n\nMISSED QUESTIONS:\n' + lines;
+  }
+
+  function parseCheatResponse(raw, count) {
+    var data;
+    try { data = JSON.parse(extractJsonText(raw)); }
+    catch (e) { throw new Error(t('errBadJson', { label: '' })); }
+    var items = (data && Array.isArray(data.items)) ? data.items : [];
+    if (items.length !== count) throw new Error(t('errBadJson', { label: '' }));
+    var clean = items.map(function (it) {
+      if (!it || typeof it.concept !== 'string' || !it.concept.trim()) throw new Error(t('errBadJson', { label: '' }));
+      var pts = (Array.isArray(it.points) ? it.points : [])
+        .filter(function (s) { return typeof s === 'string' && s.trim(); })
+        .map(function (s) { return s.trim(); }).slice(0, 3);
+      if (!pts.length) throw new Error(t('errBadJson', { label: '' }));
+      return { concept: it.concept.trim(), points: pts };
+    });
+    return clean;
+  }
+
+  /* Store the sheet with the attempt so it can be reopened from
+     Stats later without regenerating. */
+  function saveCheatSheet(sheet) {
+    if (!sheet) return;
+    if (run) run.cheatSheet = sheet;
+    cheatState.sheet = sheet;
+    if (run && run.attemptId) {
+      var list = loadStats();
+      var found = false;
+      list.forEach(function (a) {
+        if (a && a.id === run.attemptId) { a.cheatSheet = sheet; found = true; }
+      });
+      if (found) saveStats(list);
+    }
+  }
+
+  function generateCheatSheet() {
+    if (cheatState.busy) return;
+    if (run && run.cheatSheet) { showCheatSheet(run.cheatSheet, 'results'); return; }
+    var entries = cheatWrongEntries();
+    if (!entries.length) return;
+    var status = document.getElementById('cheat-status');
+    var btn = document.getElementById('cheat-sheet-btn');
+    if (!byok.apiKey) {
+      /* No key: verbatim sheet from the stored explanations. */
+      var local = buildLocalCheatSheet(entries);
+      saveCheatSheet(local);
+      showCheatSheet(local, 'results');
+      return;
+    }
+    if (isOffline()) {
+      if (status) status.textContent = t('offlineNeedNet');
+      showToast(t('offlineNeedNet'));
+      return;
+    }
+    cheatState.busy = true;
+    if (btn) btn.disabled = true;
+    if (status) status.textContent = t('cheatGenerating');
+    callProvider(buildCheatPrompt(entries, wiz.language || 'English'), 1, 'cheatsheet')
+      .then(function (raw) {
+        var items = parseCheatResponse(raw, entries.length);
+        var sheet = {
+          source: 'ai',
+          lang: wiz.language || 'English',
+          generatedAt: Date.now(),
+          title: quiz ? (quiz.title || t('quizDefaultTitle')) : t('quizDefaultTitle'),
+          items: items.map(function (it, i) {
+            return {
+              concept: it.concept,
+              points: it.points,
+              question: entries[i].question,
+              yourAnswer: entries[i].yourAnswer,
+              correctAnswer: entries[i].correctAnswer
+            };
+          })
+        };
+        cheatState.busy = false;
+        saveCheatSheet(sheet);
+        showCheatSheet(sheet, 'results');
+      })
+      .catch(function (e) {
+        cheatState.busy = false;
+        if (btn) btn.disabled = false;
+        var detail = plainError ? plainError(e) : (e && e.message ? e.message : String(e));
+        if (status) status.textContent = t('cheatFail', { detail: detail });
+        showToast(t('cheatFail', { detail: detail }));
+      });
+  }
+
+  /* The cheat sheet's own screen. `returnTo` is 'results' (from the
+     results screen) or 'stats' (reopening a stored sheet). */
+  function showCheatSheet(sheet, returnTo) {
+    if (!sheet || !Array.isArray(sheet.items) || !sheet.items.length) {
+      showToast(t('cheatNoSheet'));
+      return;
+    }
+    cheatState.sheet = sheet;
+    cheatState.returnTo = returnTo || 'results';
+    currentView = 'cheatsheet';
+    app.innerHTML = '';
+    var card = el('section', 'card cheat-card');
+    card.appendChild(el('p', 'kicker', t('cheatKicker')));
+    card.appendChild(el('h2', null, t('cheatTitle')));
+    card.appendChild(el('p', 'hero-text', t('cheatHint')));
+    card.appendChild(el('p', 'field-hint',
+      sheet.source === 'ai' ? t('cheatAiNote') : t('cheatLocalNote')));
+    sheet.items.forEach(function (it, i) {
+      var block = el('div', 'cheat-item');
+      block.appendChild(el('h3', 'cheat-concept', (i + 1) + '. ' + it.concept));
+      var ul = el('ul', 'cheat-points');
+      (it.points || []).forEach(function (p) { ul.appendChild(el('li', null, p)); });
+      block.appendChild(ul);
+      if (it.yourAnswer !== null && it.yourAnswer !== undefined && it.yourAnswer !== '') {
+        var corr = el('div', 'cheat-correction');
+        corr.appendChild(document.createTextNode(t('cheatYourAnswer')));
+        corr.appendChild(el('span', 'yours', String(it.yourAnswer)));
+        if (it.correctAnswer) {
+          corr.appendChild(document.createTextNode(' · ' + t('cheatCorrect')));
+          corr.appendChild(el('span', 'right', String(it.correctAnswer)));
+        }
+        block.appendChild(corr);
+      } else if (it.correctAnswer) {
+        var corr2 = el('div', 'cheat-correction');
+        corr2.appendChild(document.createTextNode(t('cheatCorrect')));
+        corr2.appendChild(el('span', 'right', String(it.correctAnswer)));
+        block.appendChild(corr2);
+      }
+      if (it.question) block.appendChild(el('p', 'cheat-q', t('cheatQuestion') + ': ' + it.question));
+      card.appendChild(block);
+    });
+    var row = el('div', 'btnrow');
+    var prt = el('button', 'btn btn-primary', t('cheatPrint'));
+    prt.id = 'cheat-print-btn';
+    prt.addEventListener('click', function () {
+      buildCheatPrintSheet(sheet);
+      window.print();
+    });
+    row.appendChild(prt);
+    var back = el('button', 'btn btn-secondary',
+      cheatState.returnTo === 'stats' ? t('cheatBackStats') : t('cheatBack'));
+    back.id = 'cheat-back-btn';
+    back.addEventListener('click', function () {
+      if (cheatState.returnTo === 'stats') renderStats();
+      else if (run && run.resultsShown) showResults();
+      else showStart();
+    });
+    row.appendChild(back);
+    card.appendChild(row);
+    app.appendChild(card);
+    window.scrollTo({ top: 0 });
+  }
+
+  /* Print version: the same hidden #print-sheet as the exam, so the
+     sheet prints clean black-on-white on one page (compact type,
+     no page break inside a concept). */
+  function buildCheatPrintSheet(sheet) {
+    var ps = document.getElementById('print-sheet');
+    if (!ps) {
+      ps = document.createElement('div');
+      ps.id = 'print-sheet';
+      document.body.appendChild(ps);
+    }
+    ps.innerHTML = '';
+    var date = new Date().toLocaleDateString(getLang() === 'ar' ? 'ar-EG' : 'en-GB');
+    var head = el('div', 'print-head');
+    head.appendChild(el('h1', null, t('cheatTitle')));
+    if (sheet.title) head.appendChild(el('p', 'print-sub', sheet.title));
+    head.appendChild(el('p', 'print-meta',
+      t('printMeta', { date: date })));
+    ps.appendChild(head);
+    sheet.items.forEach(function (it, i) {
+      var block = el('div', 'print-cheat');
+      block.appendChild(el('div', 'print-qtext', (i + 1) + '. ' + it.concept));
+      var ul = el('ul', 'print-cheat-points');
+      (it.points || []).forEach(function (p) { ul.appendChild(el('li', null, p)); });
+      block.appendChild(ul);
+      if (it.yourAnswer !== null && it.yourAnswer !== undefined && it.yourAnswer !== '') {
+        block.appendChild(el('div', 'print-keywhy',
+          t('cheatYourAnswer') + String(it.yourAnswer) +
+          (it.correctAnswer ? ' · ' + t('cheatCorrect') + String(it.correctAnswer) : '')));
+      } else if (it.correctAnswer) {
+        block.appendChild(el('div', 'print-keywhy', t('cheatCorrect') + String(it.correctAnswer)));
+      }
+      ps.appendChild(block);
+    });
+    return ps;
+  }
+
+  /* Test/debug handle (like window.__qfTf): the pure cheat-sheet
+     helpers, for the headless smoke test. */
+  window.__qfCheat = {
+    wrongEntries: cheatWrongEntries,
+    buildLocal: buildLocalCheatSheet,
+    buildPrompt: buildCheatPrompt,
+    parse: parseCheatResponse,
+    generate: generateCheatSheet,
+    show: showCheatSheet,
+    printSheet: buildCheatPrintSheet,
+    trim: cheatTrim
+  };
+
   /* ---------- stats dashboard (Feature 5) ----------
      Aggregates the recorded attempts from loadStats(): overall
      totals, per-topic accuracy + average time, best/worst topics,
@@ -3956,6 +5658,16 @@
       var pct = a.total ? Math.round(a.score / a.total * 100) : 0;
       item.appendChild(el('span', 'recent-score',
         t('statsScore', { score: a.score, total: a.total, pct: pct })));
+      /* Cheat sheet from mistakes (2026-11-22): reopen a stored
+         sheet without regenerating it. */
+      if (a.cheatSheet && Array.isArray(a.cheatSheet.items) && a.cheatSheet.items.length) {
+        var csBtn = el('button', 'btn btn-secondary cheat-stats-btn', t('cheatViewBtn'));
+        csBtn.type = 'button';
+        csBtn.addEventListener('click', (function (sheet) {
+          return function () { showCheatSheet(sheet, 'stats'); };
+        })(a.cheatSheet));
+        item.appendChild(csBtn);
+      }
       list.appendChild(item);
     });
     rCard.appendChild(list);
@@ -4411,17 +6123,34 @@
         if (inp) txt = inp.value;
         if (qt !== 'coding') txt = txt.trim();
       }
+      if (run.oral && pos === run.current) {
+        /* Oral mode: the transcript is the typed text for this
+           question, whatever its type. */
+        var ot = document.getElementById('oral-transcript');
+        if (ot && ot.value.trim()) txt = ot.value.trim();
+      }
       if ((qt === 'fill' || qt === 'essay' || qt === 'coding') && txt.trim()) {
         if (qt === 'fill') {
-          run.answers[pos] = { text: txt, correct: gradeFill(q, txt), timedOut: true, secs: qSecs() };
+          run.answers[pos] = { text: txt, oral: !!run.oral, correct: gradeFill(q, txt), timedOut: true, secs: qSecs() };
         } else if (qt === 'coding') {
           run.answers[pos] = {
-            text: txt, correct: false, timedOut: true, secs: qSecs(),
+            text: txt, oral: !!run.oral, correct: false, timedOut: true, secs: qSecs(),
             codeScore: 0, codeTotal: (q.tests || []).length
           };
         } else {
-          run.answers[pos] = { text: txt, correct: false, graded: false, grading: false, timedOut: true, secs: qSecs() };
+          run.answers[pos] = { text: txt, oral: !!run.oral, correct: false, graded: false, grading: false, timedOut: true, secs: qSecs() };
         }
+      } else if (run.oral && (qt === 'mcq' || qt === 'tf') && txt.trim()) {
+        var op = parseSpokenChoice(q, txt,
+          (run.optOrders[pos] || []).map(function (o) { return o.text; }));
+        run.answers[pos] = {
+          text: txt, oral: true, picked: op,
+          correct: op !== null ? run.optOrders[pos][op].correct : false,
+          graded: op !== null, grading: false, timedOut: true, secs: qSecs(),
+          score: op !== null ? (run.optOrders[pos][op].correct ? 100 : 0) : 0,
+          maxScore: 100, method: 'local',
+          gradeError: op === null ? t('oralNoMatch') : undefined
+        };
       } else if (qt === 'matching') {
         var picks = pos === run.current ? readMatchingDraft(pos)
           : ((run.matchDrafts[pos] || []).slice());
@@ -4511,6 +6240,7 @@
     run = null;
     fc = null;
     strictMode = false;   // strict is per exam, off by default
+    oralMode = false;     // oral is per exam, off by default
     strictWarned = false;
     currentView = 'quiz';
     document.getElementById('nav-create').classList.remove('active');
@@ -4576,6 +6306,18 @@
       t('strictHint') + ' ' + t('strictTotal', { time: fmtTime(strictTotalFor(quiz.questions.length)) }));
     strictHint.id = 'strict-hint';
     startCard.appendChild(strictHint);
+    var oralRow = el('label', 'set-row oral-row');
+    var oralChk = document.createElement('input');
+    oralChk.type = 'checkbox';
+    oralChk.id = 'oral-toggle';
+    oralChk.checked = false;
+    oralChk.addEventListener('change', function () { oralMode = oralChk.checked; });
+    oralRow.appendChild(oralChk);
+    oralRow.appendChild(el('span', null, t('oralToggle')));
+    startCard.appendChild(oralRow);
+    var oralHint = el('p', 'hint oral-hint', t('oralHint'));
+    oralHint.id = 'oral-hint';
+    startCard.appendChild(oralHint);
     var row = el('div', 'btnrow');
     var start = el('button', 'btn btn-primary btn-big', t('quizStart'));
     start.id = 'start-quiz-btn';
@@ -4701,6 +6443,9 @@
     var parts = [(q.question || '').trim()];
     if (qt === 'mcq' || qt === 'tf') {
       var texts = (display && display.opts) || (q.options || []);
+      /* True/False labels are UI chrome: read them in the UI
+         language, like the quiz screen shows them. */
+      if (qt === 'tf') texts = texts.map(function (x) { return tfDisplayText(x); });
       texts.forEach(function (text, i) {
         parts.push((LETTERS[i] || '') + '. ' + text);
       });
@@ -4830,6 +6575,467 @@
     }
   };
 
+  /* ---------- oral exam by voice (2026-11-22) ----------
+     The question is read aloud with the existing TTS, the student
+     answers by speaking, and the transcript is graded:
+     - MCQ / True-False: the spoken letter, number or option text is
+       matched locally first (no key needed, no API call).
+     - Open answers (essay, fill-in, coding-as-spoken): the
+       transcript goes to the provider through the same BYOK
+       callProvider flow as essay grading, scored 0–100 with short
+       feedback. With no key the answer is saved ungraded and the
+       UI says so plainly — never a fake AI grade.
+     - Matching / ordering cannot be answered in words, so in oral
+       mode they fall back to the normal written UI with a note.
+     Speech recognition is the browser Web Speech API
+     (SpeechRecognition / webkitSpeechRecognition). Where it does
+     not exist, the panel says so plainly and the student types
+     instead — the transcript is never faked. The transcript is
+     always editable by typing before submitting, and re-recording
+     replaces it. */
+  var oralRecog = null;      // active SpeechRecognition, if any
+  var oralListening = false; // is the mic currently listening?
+  var oralFinalText = '';    // final transcript accumulated this turn
+
+  function srSupported() {
+    return typeof window !== 'undefined' &&
+      !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  }
+
+  function srLangFor(q) { return ttsLangFor(q); }
+
+  /* Stop any recognition in progress (navigation, submit, language
+     switch, results). Never throws. */
+  function stopOralRecognition() {
+    oralListening = false;
+    if (oralRecog) {
+      var r = oralRecog;
+      oralRecog = null;
+      try { r.abort(); } catch (e) { try { r.stop(); } catch (e2) {} }
+    }
+    var btn = document.getElementById('oral-mic-btn');
+    if (btn) {
+      btn.classList.remove('listening');
+      btn.textContent = t('oralMicStart');
+      btn.setAttribute('aria-pressed', 'false');
+    }
+    var st = document.getElementById('oral-status');
+    if (st) st.hidden = true;
+  }
+
+  function oralErrorText(errName) {
+    if (errName === 'no-speech') return t('oralNoSpeech');
+    if (errName === 'not-allowed' || errName === 'service-not-allowed')
+      return t('oralMicDenied');
+    return t('oralMicError', { detail: errName || 'unknown' });
+  }
+
+  /* Plain words for one spoken transcript. Returns the display
+     index of the option it names, or null when it names none.
+     Understands: the option letter (A–F, or Arabic أ ب ج د هـ و),
+     the option number (1–6), ordinals (first/second…, الأول/الثاني…),
+     the words True/False (صح/خطأ، نعم/لا) for True/False, and the
+     option text itself (spoken exactly, or containing it). Matching
+     is against the DISPLAY order (run.optOrders), so it agrees with
+     what the student sees and hears. */
+  function normalizeSpoken(s) {
+    return String(s == null ? '' : s).trim().toLowerCase()
+      .replace(/ـ/g, '')
+      .replace(/[.,;:!?؟،«»"''()\[\]]/g, ' ')
+      .replace(/\s+/g, ' ').trim();
+  }
+
+  function parseSpokenChoice(q, transcript, displayOpts) {
+    var opts = displayOpts || (q.options || []);
+    if (!opts.length) return null;
+    var raw = normalizeSpoken(transcript);
+    if (!raw) return null;
+    var qt = qType(q);
+    var i, norm;
+    /* True/False words first: they are also option texts, but the
+       word forms (yes/no, نعم/لا, صواب/غلط) only make sense here. */
+    if (qt === 'tf') {
+      var tfWords = [
+        { words: ['true', 'yes', 'correct', 'right', 'صح', 'صواب', 'نعم', 'ايوه', 'أيوه'], val: 'true' },
+        { words: ['false', 'no', 'wrong', 'incorrect', 'خطأ', 'غلط', 'لا', 'لأ'], val: 'false' }
+      ];
+      for (i = 0; i < tfWords.length; i++) {
+        if (tfWords[i].words.indexOf(raw) !== -1 ||
+          tfWords[i].words.some(function (w) { return raw === w; })) {
+          for (var j = 0; j < opts.length; j++) {
+            if (normalizeSpoken(opts[j]) === tfWords[i].val) return j;
+          }
+        }
+      }
+    }
+    /* A bare letter or number: "B", "option B", "letter C", "2",
+       "the second one", "الأول", "ب". */
+    var letters = ['a', 'b', 'c', 'd', 'e', 'f'];
+    var arLetters = ['أ', 'ب', 'ج', 'د', 'ه', 'و'];
+    var ordinals = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth',
+      'الأول', 'الاول', 'الثاني', 'التاني', 'الثالث', 'التالت',
+      'الرابع', 'الخامس', 'السادس'];
+    var m = raw.match(/(?:option|letter|choice|الخيار|الحرف|رقم)\s*([a-f1-6])/);
+    var tok = m ? m[1] : raw;
+    if (tok.length === 1) {
+      var li = letters.indexOf(tok);
+      if (li !== -1 && li < opts.length) return li;
+      var ai = arLetters.indexOf(tok);
+      if (ai !== -1 && ai < opts.length) return ai;
+      var ni = parseInt(tok, 10);
+      if (!isNaN(ni) && ni >= 1 && ni <= opts.length) return ni - 1;
+    }
+    var oi = ordinals.indexOf(raw);
+    if (oi !== -1) {
+      var idx = oi % 6;
+      if (idx < opts.length) return idx;
+    }
+    /* Ordinals / number words inside a sentence: "the second one",
+       "answer number two", "الخيار التاني". Each word list is
+       grouped in sixes, so the index is the position in its group. */
+    var numGroups = [
+      ['first', 'second', 'third', 'fourth', 'fifth', 'sixth'],
+      ['الأول', 'الثاني', 'الثالث', 'الرابع', 'الخامس', 'السادس'],
+      ['الاول', 'التاني', 'التالت', 'الرابع', 'الخامس', 'السادس'],
+      ['one', 'two', 'three', 'four', 'five', 'six'],
+      ['واحد', 'اتنين', 'تلاتة', 'اربعة', 'خمسة', 'ستة'],
+      ['واحد', 'اثنين', 'ثلاثة', 'أربعة', 'خمسة', 'ستة']
+    ];
+    for (var g = 0; g < numGroups.length; g++) {
+      for (var k = 0; k < numGroups[g].length; k++) {
+        var w = numGroups[g][k];
+        if (raw === w || raw.indexOf(w + ' ') !== -1 ||
+          raw.indexOf(' ' + w) !== -1 || raw.indexOf(w) === 0) {
+          if (k < opts.length) return k;
+        }
+      }
+    }
+    /* The option text itself, spoken exactly or as part of a
+       sentence ("chlorophyll", "the answer is chlorophyll"). The
+       shortest options (True/False) are already handled above, so
+       a 2-letter minimum avoids matching "a" inside any word. */
+    for (i = 0; i < opts.length; i++) {
+      norm = normalizeSpoken(opts[i]);
+      if (norm.length >= 2 && (raw === norm || raw.indexOf(norm) !== -1)) return i;
+    }
+    return null;
+  }
+
+  /* Correct-answer text for the AI grading prompt, per type. */
+  function oralCorrectAnswer(q) {
+    var qt = qType(q);
+    if (qt === 'mcq') {
+      var o = q.options || [];
+      return (typeof q.answer === 'number' && o[q.answer] !== undefined)
+        ? o[q.answer] : '';
+    }
+    if (qt === 'tf') {
+      var oo = q.options || [];
+      var t0 = (typeof q.answer === 'number' && oo[q.answer] !== undefined)
+        ? oo[q.answer] : '';
+      var just = tfJustification(q);
+      return t0 + (just ? ' — ' + just : '');
+    }
+    if (qt === 'fill') return (q.answers || []).join(' / ');
+    if (qt === 'essay') return 'Rubric: ' + (q.rubric || '');
+    if (qt === 'coding') {
+      return 'The spoken answer should describe code that passes these tests: ' +
+        (q.tests || []).map(function (tc) {
+          return String(tc.input) + ' => ' + String(tc.expected);
+        }).join('; ');
+    }
+    return '';
+  }
+
+  /* Grade one spoken answer. Resolves {score 0–100, feedback,
+     method 'local'|'ai', picked?}. MCQ/TF with a locally matched
+     option never calls the provider. Open answers (and MCQ/TF the
+     transcript did not match) need the provider and reject with
+     '__NOKEY__' when no key is set — the caller saves the answer
+     ungraded instead of inventing a score. */
+  function gradeOral(q, transcript) {
+    var qt = qType(q);
+    if (qt === 'mcq' || qt === 'tf') {
+      var displayOpts = null;
+      if (run) {
+        var pos = run.current;
+        displayOpts = (run.optOrders[pos] || []).map(function (o) { return o.text; });
+      }
+      var picked = parseSpokenChoice(q, transcript, displayOpts);
+      if (picked !== null) {
+        var correctOpt = run ? run.optOrders[run.current][picked].correct
+          : (picked === q.answer);
+        var letter = LETTERS[picked] || '';
+        return Promise.resolve({
+          score: correctOpt ? 100 : 0, maxScore: 100,
+          correct: !!correctOpt, method: 'local', picked: picked,
+          feedback: correctOpt ? t('quizCorrect')
+            : t('quizNotQuite', { letter: LETTERS[(run ? run.optOrders[run.current] : []).findIndex(function (o) { return o.correct; })] || letter })
+        });
+      }
+    }
+    if (!byok.apiKey) return Promise.reject(new Error('__NOKEY__'));
+    if (isOffline()) return Promise.reject(new Error(t('offlineNeedNet')));
+    if (qt === 'fill') {
+      /* Fill-in: an exact accepted answer scores locally first —
+         no API call needed for a word the student said right. */
+      if (gradeFill(q, transcript)) {
+        return Promise.resolve({
+          score: 100, maxScore: 100, correct: true, method: 'local',
+          feedback: t('quizCorrect')
+        });
+      }
+    }
+    var prompt = 'You are a strict but fair exam grader. Grade the student\'s SPOKEN answer below ' +
+      '(transcribed from speech, so allow for small transcription slips) against the correct answer. ' +
+      'Reply with JSON ONLY — no markdown fences, no extra text. ' +
+      'The JSON must be an object with "score" (a whole number from 0 to 100) and ' +
+      '"feedback" (1–2 short sentences in ' + (wiz.language || 'English') +
+      ' explaining the score).\n\n' +
+      'QUESTION: ' + q.question + '\n' +
+      'CORRECT ANSWER: ' + oralCorrectAnswer(q) + '\n' +
+      'STUDENT SPOKEN ANSWER: ' + transcript;
+    return callProvider(prompt, 1, 'grade').then(function (raw) {
+      var data;
+      try { data = JSON.parse(extractJsonText(raw)); }
+      catch (e) { throw new Error(t('errBadJson', { label: '' })); }
+      var score = Number(data && data.score);
+      var fb = data && typeof data.feedback === 'string' ? data.feedback.trim() : '';
+      if (isNaN(score) || !fb) throw new Error(t('errBadJson', { label: '' }));
+      score = Math.max(0, Math.min(100, Math.round(score)));
+      return { score: score, maxScore: 100, correct: score >= 60, method: 'ai', feedback: fb };
+    });
+  }
+
+  /* Start (or stop) listening for the current question. The
+     transcript lands in #oral-transcript as it arrives — final
+     results are appended, interim results show live — and the
+     student can edit or re-record before submitting. */
+  function toggleOralListening(pos) {
+    if (oralListening) { stopOralRecognition(); return; }
+    if (!srSupported()) return;
+    var q = quiz.questions[run.qIndexes[pos]];
+    var Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var rec;
+    try { rec = new Ctor(); } catch (e) { return; }
+    rec.lang = srLangFor(q);
+    rec.interimResults = true;
+    rec.continuous = false;
+    rec.maxAlternatives = 1;
+    oralFinalText = '';
+    var baseEl = document.getElementById('oral-transcript');
+    var base = baseEl ? baseEl.value.trim() : '';
+    oralRecog = rec;
+    oralListening = true;
+    var btn = document.getElementById('oral-mic-btn');
+    if (btn) {
+      btn.classList.add('listening');
+      btn.textContent = t('oralMicStop');
+      btn.setAttribute('aria-pressed', 'true');
+    }
+    var st = document.getElementById('oral-status');
+    if (st) st.hidden = false;
+    var errBox = document.getElementById('oral-error');
+    if (errBox) errBox.hidden = true;
+    rec.onresult = function (e) {
+      var interim = '';
+      var i;
+      try {
+        for (i = e.resultIndex || 0; i < e.results.length; i++) {
+          var res = e.results[i];
+          var txt = res && res[0] ? res[0].transcript : '';
+          if (!txt) continue;
+          if (res.isFinal) oralFinalText += (oralFinalText ? ' ' : '') + txt.trim();
+          else interim += txt;
+        }
+      } catch (err) { /* a malformed result never breaks the panel */ }
+      var ta = document.getElementById('oral-transcript');
+      if (ta) {
+        var shown = (base ? base + ' ' : '') + oralFinalText +
+          (interim ? (oralFinalText || base ? ' ' : '') + interim : '');
+        ta.value = shown.trim();
+        if (!run.oralDrafts) run.oralDrafts = {};
+        run.oralDrafts[pos] = ta.value;
+      }
+    };
+    rec.onerror = function (e) {
+      var name = e && e.error ? e.error : 'unknown';
+      stopOralRecognition();
+      var box = document.getElementById('oral-error');
+      if (box) {
+        box.textContent = oralErrorText(name);
+        box.hidden = false;
+      }
+    };
+    rec.onend = function () {
+      if (oralRecog === rec) {
+        oralListening = false;
+        oralRecog = null;
+        var b = document.getElementById('oral-mic-btn');
+        if (b) {
+          b.classList.remove('listening');
+          b.textContent = t('oralMicStart');
+          b.setAttribute('aria-pressed', 'false');
+        }
+        var s = document.getElementById('oral-status');
+        if (s) s.hidden = true;
+      }
+    };
+    try { rec.start(); } catch (e) { stopOralRecognition(); }
+  }
+
+  /* The oral answer panel: mic button, live status, error note,
+     editable transcript, re-record and submit. When the browser
+     has no SpeechRecognition the panel says so plainly and the
+     textarea is still there — typing is the fallback, never a
+     fake transcription. */
+  function oralPanel(pos, q) {
+    var wrap = el('div', 'oral-wrap');
+    if (!srSupported()) {
+      wrap.appendChild(el('div', 'oral-note', t('oralNoSupport')));
+    }
+    var micRow = el('div', 'oral-mic-row');
+    var mic = el('button', 'btn btn-primary mic-btn', t('oralMicStart'));
+    mic.type = 'button';
+    mic.id = 'oral-mic-btn';
+    mic.setAttribute('aria-pressed', 'false');
+    if (!srSupported()) mic.disabled = true;
+    mic.addEventListener('click', function () { mic.blur(); toggleOralListening(pos); });
+    micRow.appendChild(mic);
+    var re = el('button', 'btn btn-secondary btn-small', t('oralRerecord'));
+    re.type = 'button';
+    re.id = 'oral-rerecord-btn';
+    re.addEventListener('click', function () {
+      re.blur();
+      stopOralRecognition();
+      if (!run.oralDrafts) run.oralDrafts = {};
+      run.oralDrafts[pos] = '';
+      var ta = document.getElementById('oral-transcript');
+      if (ta) { ta.value = ''; ta.focus(); }
+      if (srSupported()) toggleOralListening(pos);
+    });
+    micRow.appendChild(re);
+    wrap.appendChild(micRow);
+    var status = el('div', 'oral-status', t('oralListening'));
+    status.id = 'oral-status';
+    status.hidden = true;
+    wrap.appendChild(status);
+    var errBox = el('div', 'oral-error');
+    errBox.id = 'oral-error';
+    errBox.hidden = true;
+    wrap.appendChild(errBox);
+    wrap.appendChild(el('label', 'field-hint oral-label', t('oralTranscript')));
+    var ta2 = document.createElement('textarea');
+    ta2.id = 'oral-transcript';
+    ta2.className = 'input textarea oral-transcript';
+    ta2.rows = 3;
+    ta2.placeholder = t('oralTranscriptPh');
+    ta2.setAttribute('aria-label', t('oralTranscriptPh'));
+    ta2.value = (run.oralDrafts && run.oralDrafts[pos]) || '';
+    ta2.addEventListener('input', function () {
+      if (!run.oralDrafts) run.oralDrafts = {};
+      run.oralDrafts[pos] = ta2.value;
+    });
+    wrap.appendChild(ta2);
+    var sub = el('button', 'btn btn-primary', t('oralSubmit'));
+    sub.type = 'button';
+    sub.id = 'oral-submit-btn';
+    sub.addEventListener('click', function () { sub.blur(); submitOral(pos); });
+    wrap.appendChild(sub);
+    return wrap;
+  }
+
+  /* Submit a spoken answer. MCQ/TF the transcript did not match
+     locally and no key is set cannot be graded at all, so the
+     student is told to say an option or edit the text instead of
+     being marked wrong on a guess. Open answers with no key are
+     saved ungraded (like an essay with no key). While AI grading
+     runs the question shows a "checking…" state. */
+  function submitOral(pos) {
+    if (!run || run.answers[pos] !== null) return;
+    stopOralRecognition();
+    var q = quiz.questions[run.qIndexes[pos]];
+    var qt = qType(q);
+    var ta = document.getElementById('oral-transcript');
+    var text = ta ? ta.value.trim() : ((run.oralDrafts && run.oralDrafts[pos]) || '').trim();
+    if (!text) {
+      showToast(t('oralEmpty'));
+      if (ta) ta.focus();
+      return;
+    }
+    if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
+    var secs = qSecs();
+    run.qShownAt = null;
+    if (!run.oralDrafts) run.oralDrafts = {};
+    run.oralDrafts[pos] = text;
+    /* MCQ/TF, no local match, no key: nothing honest can be said
+       about the answer — send the student back to the transcript
+       instead of inventing a verdict. */
+    if ((qt === 'mcq' || qt === 'tf') && !byok.apiKey) {
+      var displayOpts = (run.optOrders[pos] || []).map(function (o) { return o.text; });
+      if (parseSpokenChoice(q, text, displayOpts) === null) {
+        showToast(t('oralNoMatch'));
+        if (ta) ta.focus();
+        if (perQTimerId === null && settings.perQTimer) startPerQTimer();
+        run.qShownAt = Date.now();
+        return;
+      }
+    }
+    run.answers[pos] = {
+      text: text, oral: true, correct: null, graded: false, grading: true,
+      timedOut: false, secs: secs
+    };
+    renderQuestion();
+    gradeOral(q, text).then(function (res) {
+      var a = run && run.answers[pos];
+      if (!a || a.text !== text) return;
+      a.grading = false;
+      a.graded = true;
+      a.score = res.score;
+      a.maxScore = res.maxScore;
+      a.feedback = res.feedback;
+      a.method = res.method;
+      a.correct = res.correct;
+      if (typeof res.picked === 'number') a.picked = res.picked;
+      if (run.isReview) {
+        var rr = recordReviewAnswer(quiz, q, a.correct);
+        run.reviewLast = rr;
+        if (rr.mastered) run.reviewMastered++;
+      }
+      renderQuestion();
+      var nx = document.getElementById('next-btn');
+      if (nx) nx.focus();
+    }).catch(function (e) {
+      var a = run && run.answers[pos];
+      if (!a || a.text !== text) return;
+      a.grading = false;
+      a.graded = false;
+      a.correct = false;
+      a.gradeError = (e && e.message === '__NOKEY__')
+        ? t('oralNoKey')
+        : t('oralGradeFail', { detail: plainError(e) });
+      renderQuestion();
+      var nx2 = document.getElementById('next-btn');
+      if (nx2) nx2.focus();
+    });
+  }
+
+  /* Debug/test handle for the oral exam. */
+  window.__qfOral = {
+    supported: srSupported,
+    listening: function () { return oralListening; },
+    parseChoice: parseSpokenChoice,
+    correctAnswer: oralCorrectAnswer,
+    gradeOral: gradeOral,
+    stop: stopOralRecognition,
+    state: function () {
+      return {
+        supported: srSupported(), listening: oralListening,
+        oralMode: oralMode, runOral: !!(run && run.oral)
+      };
+    }
+  };
+
   /* ---------- quiz engine: run ---------- */
 
   function startQuiz(qIndexes, opts) {
@@ -4885,6 +7091,10 @@
       /* Strict mode never applies to review sessions; retry runs from
          the results screen start normal unless re-enabled there. */
       strict: strictMode && !(opts && opts.isReview),
+      /* Oral mode never applies to review sessions; retry runs from
+         the results screen keep the mode the attempt started in. */
+      oral: oralMode && !(opts && opts.isReview),
+      oralDrafts: {},    // oral: spoken/typed transcript per position
       strictTotal: 0,
       strictLeft: 0,
       isRetry: !!qIndexes,
@@ -4930,6 +7140,7 @@
        new screen. Auto-read below speaks again only for a new
        position. */
     stopSpeech();
+    stopOralRecognition();
     var pos = run.current;
     var qi = run.qIndexes[pos];
     var q = quiz.questions[qi];
@@ -5008,6 +7219,7 @@
       speakBtn.id = 'speak-btn';
       meta.appendChild(speakBtn);
     }
+    if (run.oral) meta.appendChild(el('span', 'topic-tag oral-badge', t('oralBadge')));
     card.appendChild(meta);
     card.appendChild(el('h2', 'q-text', q.question));
     if (q.code) {
@@ -5016,27 +7228,54 @@
       card.appendChild(pre);
     }
     if (qt === 'mcq' || qt === 'tf') {
-      var list = el('div', 'opts');
-      run.optOrders[pos].forEach(function (opt, idx) {
-        var btn = el('button', 'opt');
-        btn.type = 'button';
-        btn.appendChild(el('span', 'letter', LETTERS[idx]));
-        var txt = el('span', 'opt-text');
-        txt.textContent = opt.text;
-        btn.appendChild(txt);
-        if (state) {
-          btn.disabled = true;
-          if (opt.correct) btn.classList.add('correct');
-          if (idx === state.picked && !state.correct) btn.classList.add('wrong');
-          if (!opt.correct && idx !== state.picked) btn.classList.add('dim');
-        }
-        btn.addEventListener('click', function () {
-          btn.blur();
-          onPick(pos, idx);
+      if (run.oral && !state) {
+        /* Oral mode: the options stay visible (and are read aloud),
+           but they are not clickable — the answer comes by voice.
+           The transcript panel below takes the spoken answer. */
+        var olist = el('div', 'opts');
+        run.optOrders[pos].forEach(function (opt, idx) {
+          var row = el('div', 'opt opt-static');
+          row.appendChild(el('span', 'letter', LETTERS[idx]));
+          var otxt = el('span', 'opt-text');
+          otxt.textContent = qt === 'tf' ? tfDisplayText(opt.text) : opt.text;
+          row.appendChild(otxt);
+          olist.appendChild(row);
         });
-        list.appendChild(btn);
-      });
-      card.appendChild(list);
+        card.appendChild(olist);
+        card.appendChild(oralPanel(pos, q));
+      } else {
+        var list = el('div', 'opts');
+        run.optOrders[pos].forEach(function (opt, idx) {
+          var btn = el('button', 'opt');
+          btn.type = 'button';
+          btn.appendChild(el('span', 'letter', LETTERS[idx]));
+          var txt = el('span', 'opt-text');
+          /* True/False labels are UI chrome, not content: show them
+             in the UI language (صح/خطأ in Arabic). */
+          txt.textContent = qt === 'tf' ? tfDisplayText(opt.text) : opt.text;
+          btn.appendChild(txt);
+          if (state) {
+            btn.disabled = true;
+            if (opt.correct) btn.classList.add('correct');
+            if (idx === state.picked && !state.correct) btn.classList.add('wrong');
+            if (!opt.correct && idx !== state.picked) btn.classList.add('dim');
+          }
+          btn.addEventListener('click', function () {
+            btn.blur();
+            onPick(pos, idx);
+          });
+          list.appendChild(btn);
+        });
+        card.appendChild(list);
+        /* An oral answer's transcript, shown under the options once
+           answered (the picked option is already highlighted above). */
+        if (state && state.oral && state.text) {
+          var heard = el('div', 'oral-heard');
+          heard.appendChild(el('b', null, t('oralYourAnswer')));
+          heard.appendChild(document.createTextNode(state.text));
+          card.appendChild(heard);
+        }
+      }
     } else if (qt === 'coding') {
       /* Coding: a monospace editor prefilled with the starter code, a
          Run tests button (checks without submitting) and a Submit
@@ -5050,6 +7289,10 @@
         var resBoxDone = el('div', 'code-results');
         card.appendChild(resBoxDone);
         if (state.results) renderCodeResults(state.results, resBoxDone);
+      } else if (run.oral) {
+        /* Oral mode: the student describes the code by voice; the
+           transcript is graded by the provider against the tests. */
+        card.appendChild(oralPanel(pos, q));
       } else {
         var codeWrap = el('div', 'code-wrap');
         codeWrap.appendChild(el('p', 'field-hint', t('codeLangNote')));
@@ -5092,6 +7335,8 @@
          right partners. The draft lives on run.matchDrafts so a
          re-render (language switch) never loses the picks. */
       var matchWrap = el('div', 'match-wrap');
+      if (run.oral && !state)
+        matchWrap.appendChild(el('div', 'oral-note', t('oralNotForType')));
       matchWrap.appendChild(el('p', 'field-hint', t('matchRule')));
       var headRow = el('div', 'match-row match-head');
       headRow.appendChild(el('span', 'match-col', t('matchLeftCol')));
@@ -5147,6 +7392,8 @@
          simple and reliable on touch and keyboard). The draft lives
          on run.orderDrafts so a re-render never loses the order. */
       var orderWrap = el('div', 'order-wrap');
+      if (run.oral && !state)
+        orderWrap.appendChild(el('div', 'oral-note', t('oralNotForType')));
       orderWrap.appendChild(el('p', 'field-hint', t('orderRule')));
       if (!run.orderDrafts[pos]) {
         run.orderDrafts[pos] = (run.orderOrders[pos] || []).slice();
@@ -5194,7 +7441,11 @@
          note and the Next button stays hidden until grading resolves. */
       var freeWrap = el('div', 'free-wrap');
       if (state && state.grading) {
-        freeWrap.appendChild(el('div', 'grading-note', t('essayGrading')));
+        freeWrap.appendChild(el('div', 'grading-note',
+          t(state.oral ? 'oralGrading' : 'essayGrading')));
+      } else if (!state && run.oral) {
+        /* Oral mode: the spoken answer replaces the textarea. */
+        freeWrap.appendChild(oralPanel(pos, q));
       } else if (!state) {
         var input;
         if (qt === 'essay') {
@@ -5231,7 +7482,19 @@
     if (state && !state.grading) {
       var ex = el('div', 'explain show');
       if (qt === 'coding') {
-        if (state.timedOut && !state.results) {
+        if (state.oral) {
+          /* Spoken code: no test run — the provider graded the
+             spoken description, or it is ungraded with no key. */
+          if (state.graded) {
+            ex.appendChild(el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
+              t('oralScore', { score: state.score })));
+            ex.appendChild(el('b', null, t('oralFeedback')));
+            ex.appendChild(document.createTextNode(state.feedback || ''));
+          } else {
+            ex.appendChild(el('div', 'verdict', t('essayNotGraded')));
+            ex.appendChild(document.createTextNode(state.gradeError || t('oralNoKey')));
+          }
+        } else if (state.timedOut && !state.results) {
           ex.appendChild(el('div', 'verdict timeout', t('resTimeout')));
         } else if (state.results) {
           if (state.results.timedOut) {
@@ -5252,8 +7515,9 @@
           ex.appendChild(document.createTextNode(q.rubric));
         } else if (state.graded) {
           ex.appendChild(el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
-            t('essayScore', { score: state.score, max: state.maxScore })));
-          ex.appendChild(el('b', null, t('essayFeedback')));
+            state.oral ? t('oralScore', { score: state.score })
+              : t('essayScore', { score: state.score, max: state.maxScore })));
+          ex.appendChild(el('b', null, state.oral ? t('oralFeedback') : t('essayFeedback')));
           ex.appendChild(document.createTextNode(state.feedback || ''));
         } else {
           ex.appendChild(el('div', 'verdict', t('essayNotGraded')));
@@ -5298,6 +7562,28 @@
         ord.appendChild(document.createTextNode(
           (q.items || []).map(function (s, i) { return (i + 1) + '. ' + s; }).join(' · ')));
         ex.appendChild(ord);
+      } else if (qt === 'tf') {
+        /* True/False: the verdict, then the justification — the
+           point of the type — in its own highlighted box, right
+           after answering. */
+        if (state.timedOut) {
+          ex.appendChild(el('div', 'verdict timeout', t('quizTimeout', {
+            letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+          })));
+        } else {
+          ex.appendChild(el('div', 'verdict ' + (state.correct ? 'ok' : 'no'),
+            state.correct ? t('quizCorrect')
+              : t('quizNotQuite', {
+                letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
+              })));
+        }
+        var just = tfJustification(q);
+        if (just) {
+          var jb = el('div', 'tf-just');
+          jb.appendChild(el('b', null, t('tfJustification')));
+          jb.appendChild(document.createTextNode(just));
+          ex.appendChild(jb);
+        }
       } else if (state.timedOut) {
         ex.appendChild(el('div', 'verdict timeout', t('quizTimeout', {
           letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
@@ -5309,7 +7595,19 @@
               letter: LETTERS[run.optOrders[pos].findIndex(function (o) { return o.correct; })]
             })));
       }
-      if (q.explanation) {
+      /* The generic explanation — skipped for True/False when the
+         justification above already showed it (or its fallback),
+         so the same reason is never printed twice. An oral
+         MCQ/TF answer also shows its numeric score and the
+         provider's feedback here (the verdict above is only
+         right/wrong). */
+      if ((qt === 'mcq' || qt === 'tf') && state.oral && state.graded) {
+        var os = el('div', 'rex');
+        os.appendChild(el('b', null, t('oralScore', { score: state.score }) + ' · '));
+        os.appendChild(document.createTextNode(state.feedback || ''));
+        ex.appendChild(os);
+      }
+      if (q.explanation && !(qt === 'tf' && tfJustification(q))) {
         ex.appendChild(document.createElement('br'));
         ex.appendChild(el('b', null, t('quizWhy')));
         ex.appendChild(document.createTextNode(q.explanation));
@@ -5335,7 +7633,9 @@
       app.appendChild(row);
     } else if (!state) {
       if (run.strict) app.appendChild(el('div', 'hint', t('strictForwardHint')));
-      if (qt === 'mcq' || qt === 'tf') {
+      if (run.oral) {
+        app.appendChild(el('div', 'hint', t('oralSpeakHint')));
+      } else if (qt === 'mcq' || qt === 'tf') {
         app.appendChild(el('div', 'hint', t('quizKeysHint', { n: Math.min(run.optOrders[pos].length, 6) })));
       } else {
         app.appendChild(el('div', 'hint', t(
@@ -5348,8 +7648,10 @@
 
     /* Auto-read: read the question aloud when it first appears —
        once per position, so a re-render (submit, language switch,
-       moving an ordering item) does not read it again. */
-    if (settings.autoRead && run.ttsAutoPos !== pos) {
+       moving an ordering item) does not read it again. In oral
+       mode the question is always read aloud — that is the point
+       of the mode — even when the auto-read setting is off. */
+    if ((settings.autoRead || run.oral) && run.ttsAutoPos !== pos) {
       run.ttsAutoPos = pos;
       var autoBtn = document.getElementById('speak-btn');
       speakQuestion(q, ttsDisplayFor(pos), autoBtn || null);
@@ -5657,6 +7959,49 @@
       var inp = document.getElementById(qt === 'coding' ? 'code-editor' : 'free-answer-input');
       if (inp) txt = inp.value.trim();
     }
+    if (run.oral) {
+      /* Oral mode: keep whatever was spoken or typed so far. A
+         matched MCQ/TF option still scores; anything else is kept
+         ungraded with the time-out noted — never graded after the
+         clock, and never invented. */
+      var ota = document.getElementById('oral-transcript');
+      var otxt = ota ? ota.value.trim()
+        : ((run.oralDrafts && run.oralDrafts[run.current]) || '').trim();
+      if (otxt) {
+        var oans;
+        if (qt === 'mcq' || qt === 'tf') {
+          var opicked = parseSpokenChoice(q, otxt,
+            (run.optOrders[run.current] || []).map(function (o) { return o.text; }));
+          oans = { text: otxt, oral: true, picked: opicked, correct: false,
+            graded: false, grading: false, timedOut: true, secs: qSecs() };
+          if (opicked !== null) {
+            oans.correct = run.optOrders[run.current][opicked].correct;
+            oans.graded = true;
+            oans.score = oans.correct ? 100 : 0;
+            oans.maxScore = 100;
+            oans.method = 'local';
+          } else {
+            oans.gradeError = t('oralNoMatch');
+          }
+        } else if (qt === 'matching' || qt === 'ordering') {
+          oans = null; /* written UI — fall through to the normal path */
+        } else {
+          oans = { text: otxt, oral: true, correct: false, graded: false,
+            grading: false, timedOut: true, secs: qSecs(),
+            gradeError: t('resTimeout') };
+        }
+        if (oans) {
+          stopOralRecognition();
+          run.answers[run.current] = oans;
+          if (run.isReview) run.reviewLast = recordReviewAnswer(quiz, q, oans.correct);
+          run.qShownAt = null;
+          renderQuestion();
+          var onx = document.getElementById('next-btn');
+          if (onx) onx.focus();
+          return;
+        }
+      }
+    }
     if (qt === 'fill' && txt) {
       var fc = gradeFill(q, txt);
       run.answers[run.current] = { text: txt, correct: fc, timedOut: true, secs: qSecs() };
@@ -5710,6 +8055,7 @@
 
   function nextQuestion() {
     stopSpeech();
+    stopOralRecognition();
     if (perQTimerId !== null) { clearInterval(perQTimerId); perQTimerId = null; }
     if (run.current < run.qIndexes.length - 1) {
       run.current++;
@@ -5737,6 +8083,7 @@
   function showResults() {
     stopTimers();
     stopSpeech();
+    stopOralRecognition();
     if (run.isReview) { showReviewResults(); return; }
     if (run) run.resultsShown = true;
     /* A strict attempt ends here: leave fullscreen, and a re-take from
@@ -5763,8 +8110,9 @@
        screen, and re-recording would duplicate the attempt. */
     if (!run.statsRecorded) {
       run.statsRecorded = true;
+      run.attemptId = 'a' + Date.now().toString(36);
       recordAttempt({
-      id: 'a' + Date.now().toString(36),
+      id: run.attemptId,
       ts: Date.now(),
       title: quiz.title || t('quizDefaultTitle'),
       total: total,
@@ -5832,8 +8180,37 @@
         item.appendChild(pre);
       }
       var yours = (a && a.picked !== null && a.picked !== undefined) ? opts[a.picked].text : null;
+      /* True/False labels are UI chrome: show them in the UI
+         language (صح/خطأ in Arabic), like the quiz itself does. */
+      if (qt === 'tf' && yours !== null) yours = tfDisplayText(yours);
+      var correctText = (correctIdx >= 0 && opts[correctIdx]) ? opts[correctIdx].text : '';
+      if (qt === 'tf') correctText = tfDisplayText(correctText);
       var line = el('div', 'ra');
-      if (qt === 'essay') {
+      if (a && a.oral) {
+        /* Spoken answer: the transcript is the answer, plus the
+           oral score/feedback (or the plain no-grade note). For
+           MCQ/TF the correct option is shown when it was missed. */
+        line.appendChild(document.createTextNode(t('oralYourAnswer')));
+        line.appendChild(el('span', 'yours' + ((a && a.correct) ? ' ok' : ''),
+          (a && a.text) ? a.text : t('resNoAnswer')));
+        item.appendChild(line);
+        if (a.graded) {
+          var ofb = el('div', 'rex');
+          ofb.appendChild(el('b', null, t('oralScore', { score: a.score }) + ' · '));
+          ofb.appendChild(document.createTextNode(a.feedback || ''));
+          item.appendChild(ofb);
+        } else if (!a.timedOut) {
+          var ong = el('div', 'rex');
+          ong.appendChild(document.createTextNode(a.gradeError || t('oralNoKey')));
+          item.appendChild(ong);
+        }
+        if ((qt === 'mcq' || qt === 'tf') && !(a && a.correct)) {
+          var oc = el('div', 'ra');
+          oc.appendChild(document.createTextNode(t('resCorrectIs')));
+          oc.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + correctText));
+          item.appendChild(oc);
+        }
+      } else if (qt === 'essay') {
         line.appendChild(document.createTextNode(t('essayYourAnswer')));
         line.appendChild(el('span', 'yours' + ((a && a.correct) ? ' ok' : ''),
           (a && a.text) ? a.text : t('resNoAnswer')));
@@ -5919,16 +8296,25 @@
         line.appendChild(document.createTextNode(t('resYourAnswer')));
         line.appendChild(el('span', 'yours', t('resNoAnswerTimeout')));
         line.appendChild(document.createTextNode(t('resCorrectIs')));
-        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + opts[correctIdx].text));
+        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + correctText));
         item.appendChild(line);
       } else {
         line.appendChild(document.createTextNode(t('resYourAnswer')));
         line.appendChild(el('span', 'yours', '✗ ' + (yours !== null ? yours : t('resNoAnswer'))));
         line.appendChild(document.createTextNode(t('resCorrectIs')));
-        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + opts[correctIdx].text));
+        line.appendChild(el('span', 'right', LETTERS[correctIdx] + ') ' + correctText));
         item.appendChild(line);
       }
-      if (q.explanation) {
+      /* True/False justification, prominently — the point of the
+         type. Shown for right and wrong answers alike; the generic
+         explanation is skipped when the justification is shown, so
+         the same reason is never printed twice. */
+      if (qt === 'tf' && tfJustification(q)) {
+        var tj = el('div', 'rex tf-just');
+        tj.appendChild(el('b', null, t('tfJustification')));
+        tj.appendChild(document.createTextNode(tfJustification(q)));
+        item.appendChild(tj);
+      } else if (q.explanation) {
         var rex = el('div', 'rex');
         rex.appendChild(el('b', null, t('quizWhy')));
         rex.appendChild(document.createTextNode(q.explanation));
@@ -5942,6 +8328,23 @@
       var a = run.answers[pos];
       return !a || !a.correct;
     });
+    /* Cheat sheet from mistakes (2026-11-22): one button when there
+       is anything to put on the sheet; with a perfect score there is
+       nothing to show, so no section at all. */
+    if (wrongIndexes.length > 0) {
+      var cheatSec = el('section', 'card cheat-sec');
+      cheatSec.appendChild(el('h2', 'cheat-sec-title', t('cheatTitle')));
+      cheatSec.appendChild(el('p', 'muted', t('cheatHint')));
+      var cheatBtn = el('button', 'btn btn-primary', t('cheatBtn', { n: wrongIndexes.length }));
+      cheatBtn.id = 'cheat-sheet-btn';
+      cheatBtn.type = 'button';
+      cheatBtn.addEventListener('click', function () { generateCheatSheet(); });
+      cheatSec.appendChild(cheatBtn);
+      var cheatStatus = el('p', 'gen-progress cheat-status');
+      cheatStatus.id = 'cheat-status';
+      cheatSec.appendChild(cheatStatus);
+      card.appendChild(cheatSec);
+    }
     if (wrongIndexes.length > 0) {
       var retryWrong = el('button', 'btn btn-primary', t('resRetryWrong', { n: wrongIndexes.length }));
       retryWrong.addEventListener('click', function () { startQuiz(wrongIndexes); });
@@ -6030,7 +8433,9 @@
     var tag = (e.target && e.target.tagName) || '';
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     var state = run.answers[run.current];
-    if (!state && /^[1-6]$/.test(e.key)) {
+    /* In oral mode the number keys must not pick a written answer —
+       the answer comes by voice. */
+    if (!state && !run.oral && /^[1-6]$/.test(e.key)) {
       var idx = parseInt(e.key, 10) - 1;
       if (idx < run.optOrders[run.current].length) {
         e.preventDefault();

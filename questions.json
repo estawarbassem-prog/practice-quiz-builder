@@ -131,6 +131,45 @@
       "topic": "Pointers"
     },
     {
+      "answer": 1,
+      "explanation": "Pointer arithmetic is scaled by the size of the pointed-to type: p++ on an int* advances by sizeof(int), not by one byte.",
+      "justification": "p++ on an int* advances by sizeof(int) — 4 bytes on most systems — not by one byte, because pointer arithmetic is scaled by the size of the type the pointer points to.",
+      "options": [
+        "True",
+        "False"
+      ],
+      "question": "In C, p++ on an int *p moves the pointer forward by exactly one byte.",
+      "topic": "Pointers",
+      "difficulty": "Easy",
+      "type": "tf"
+    },
+    {
+      "answer": 0,
+      "explanation": "Head insertion needs no traversal of the list, so it is O(1).",
+      "justification": "Only the new node's next pointer and head change — no traversal of the list is needed, so the cost does not grow with the list's size.",
+      "options": [
+        "True",
+        "False"
+      ],
+      "question": "Inserting a node at the head of a singly linked list takes O(1) time.",
+      "topic": "Linked List",
+      "difficulty": "Easy",
+      "type": "tf"
+    },
+    {
+      "answer": 1,
+      "explanation": "delete frees the memory, but p keeps the old address until you reset it yourself.",
+      "justification": "delete frees the memory p points to but does not change p itself — p still holds the old address (a dangling pointer) until you assign p = nullptr yourself.",
+      "options": [
+        "True",
+        "False"
+      ],
+      "question": "After delete p; in C++, the pointer p automatically becomes nullptr.",
+      "topic": "Pointers",
+      "difficulty": "Easy",
+      "type": "tf"
+    },
+    {
       "question": "Match each pointer term with its correct meaning.",
       "type": "matching",
       "pairs": [
@@ -169,6 +208,6 @@
       "explanation": "The function must return a + b for any two numbers — the tests check three different pairs, including a negative number."
     }
   ],
-  "subtitle": "10 multiple-choice questions + 1 coding question + 1 matching + 1 ordering · Data Structures · Level: second-year CS",
+  "subtitle": "10 multiple-choice questions + 3 true/false + 1 coding question + 1 matching + 1 ordering · Data Structures · Level: second-year CS",
   "title": "CS.212 — Pointers & Linked Lists"
 }

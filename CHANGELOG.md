@@ -4,6 +4,314 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — Cheat sheet from mistakes (ورقة غش من الأخطاء)
+
+- **"📄 Cheat sheet from your mistakes" on the results screen** — shown
+  only when the attempt has at least one wrong answer (with the count of
+  missed questions); a perfect score shows no button and no section at
+  all. Each entry covers exactly one missed concept: a heading, 1–3
+  short lines with the correct fact / formula / definition, and the
+  student's mistake corrected (your answer vs the right answer).
+- **With an API key: condensed by the provider** — the missed questions
+  (question + your answer + correct answer + explanation) go through
+  the same BYOK callProvider flow as the material summary, in the
+  exam's language. The reply must come back with exactly one item per
+  missed question, in the same order — any other shape is rejected, so
+  the sheet can never cover a concept the student did not miss.
+- **Without a key: built verbatim from the stored explanations** — the
+  correct answer plus the question's own explanation, trimmed to short
+  lines, never rewritten and never presented as an AI summary; the
+  sheet says so plainly.
+- **Stored with the attempt and revisitable** — the sheet is saved on
+  the stats attempt record (`qf-stats`) and on the live run, so it
+  opens again from the results screen or from a "📄 Cheat sheet" button
+  next to the attempt on the Stats screen, without regenerating (no
+  extra provider call). Works for every question type (MCQ, True/False
+  with justification, fill-in, essay rubric, matching, ordering,
+  coding tests).
+- **Printable on one page** — a print button rebuilds the hidden
+  #print-sheet with the cheat sheet and calls window.print(), reusing
+  the existing print CSS (black-on-white even in dark mode, compact
+  type, no page break inside a concept).
+- 17 new i18n keys (English + Arabic); works in both languages and in
+  dark mode, at 1280px and 390px, RTL-safe.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 34 checks passed (results button with wrong count, exact
+  missed-concept coverage with nothing else, your-vs-correct
+  corrections, one provider call, stored sheet reopened from results
+  and from Stats with no new call, no-key verbatim sheet with zero
+  provider calls, wrong-count reply rejected, perfect score shows
+  nothing, Arabic RTL button + sheet, dark mode at 390px with no
+  overflow, real print-to-PDF of the sheet — exactly 1 page, zero
+  console errors). Screenshots: docs/screenshots/cheat-en.png,
+  docs/screenshots/cheat-ar.png. A real provider call was NOT verified
+  — the test used a local mock endpoint only.
+
+## 2026-11-22 — Oral exam by voice (امتحان شفوي بالصوت)
+
+- **"🎙️ Oral exam" toggle on the quiz start screen** — next to the
+  strict-mode toggle; the question is read aloud (existing TTS, exam
+  language) and answered by speaking. Review sessions never run oral.
+  In oral mode the question is always read aloud when it appears,
+  even when the auto-read setting is off; the number keys no longer
+  pick a written answer, and recognition stops on submit, navigation,
+  language switch and results.
+- **Answer by voice** — a mic button (pulsing red while listening)
+  uses the browser SpeechRecognition API (webkitSpeechRecognition
+  where available) in the exam's language (ar-EG / en-US). The live
+  transcript appears as it is spoken (final + interim results) and
+  stays editable by typing before submitting; "Record again" clears
+  it and starts a fresh recording. If the browser has no speech
+  recognition, the panel says so plainly, the mic button is disabled,
+  and typing is the fallback — the transcript is never faked.
+  Recognition errors are plain words: no speech heard, microphone
+  denied, or a generic failure with the error name.
+- **Local matching, no key needed** — a spoken letter (A–F, or Arabic
+  أ ب ج د هـ و), number (1–6), ordinal ("the second one", "الخيار
+  التاني"), or the option text itself is matched against the displayed
+  (shuffled) options, so saying the right option scores correctly
+  with no API call. True/False understands True/False, صح/خطأ،
+  نعم/لا, and yes/no. Fill-in exact accepted answers also score
+  locally. A transcript that matches no option and no key is set is
+  not submitted — the student is told to say an option or edit the
+  text instead of being marked wrong on a guess.
+- **AI evaluation for open answers** — essay, fill-in (non-exact),
+  coding-as-spoken, and unmatched MCQ/TF transcripts go to the
+  provider through the same BYOK callProvider flow as essay grading
+  (score 0–100 + short feedback, transcription slips allowed for).
+  With no key the spoken answer is saved ungraded with a clear
+  message that AI evaluation needs a key — never a fake AI grade.
+  Matching / ordering cannot be answered in words, so in oral mode
+  they show a note and fall back to the normal written UI.
+- **Score + feedback everywhere** — per question after answering
+  (transcript, oral 0–100 score, feedback) and in the results review,
+  alongside the correct answer when it was missed. Per-question and
+  strict-mode timeouts keep a spoken/typed transcript instead of
+  dropping it, graded locally where possible.
+- 27 new i18n keys (English + Arabic); works in both languages and
+  in dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 43 checks passed (spoken-choice parsing units, mic
+  listening state + transcript from a stubbed SpeechRecognition,
+  auto-read of the question in oral mode, MCQ/TF/fill local matching
+  with zero provider calls, essay AI grading 85/100 via the mock,
+  re-record replacing the transcript, matching fallback note, no-key
+  path with the plain message and unmatched-transcript toast,
+  unsupported-browser message with typing fallback, mic-denied
+  error, Arabic RTL, dark mode, 390px with no overflow, zero console
+  errors). Real-microphone speech recognition in a real browser was
+  NOT verified — the test stubbed SpeechRecognition, as headless
+  Chrome has no microphone. Screenshots: docs/screenshots/oral-en.png,
+  docs/screenshots/oral-ar.png.
+
+## 2026-11-22 — Generate questions from a link (توليد أسئلة من لينك)
+
+- **"Or generate questions from a link" on step 1 of the wizard** —
+  paste a link to an article, a Wikipedia page or a documentation
+  page and hit Fetch: the page text becomes exam material and flows
+  into the existing generation pipeline unchanged (chunking,
+  settings, provider, save to My exams with the material stored, so
+  fresh variants and chat-with-material work from it too).
+- **Reading a page** — the fetch runs client-side with `fetch()`;
+  HTML is parsed with `DOMParser` (which never runs scripts) and
+  the readable text is kept (headings, paragraphs, list items,
+  preferring `<article>` / `<main>` when the page marks them) while
+  scripts, styles, navigation, headers, footers and forms are
+  dropped. Plain-text pages are used as-is. Links are dropped to
+  their text, so there are no relative URLs left to resolve; the
+  stored source URL itself is always absolute (a missing scheme is
+  completed with `https://`, anything that is not http(s) or
+  contains a space is rejected with a plain message).
+- **CORS failure is never silent** — many sites block cross-origin
+  fetches, so a failed fetch shows a clear message explaining the
+  page could not be fetched directly (the site probably blocks it)
+  and offers the paste fallback right there: a textarea for the
+  article text, which then becomes the material with the link still
+  recorded as the source. A page that loads but has no readable text
+  says so instead of showing the blocked message.
+- **Public reader service is opt-in only** — a labelled checkbox
+  ("If the direct fetch is blocked, try a public reader service
+  (r.jina.ai)") may route the URL through r.jina.ai when the direct
+  fetch fails; it is never used silently, and the success message
+  says the text came through the reader service.
+- **Very long pages are capped** at the same 200,000-character
+  material cap used elsewhere, with a plain note ("only the first
+  200,000 were kept"). The source URL is stored with the saved exam
+  (`sourceUrl`) and shown on its card in My exams as a link, and it
+  travels to fresh variants.
+- 20 new i18n keys (English + Arabic); works in both languages and
+  in dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 57 checks passed (URL validation and text extraction
+  units, fetching a local CORS article end to end into a generated
+  exam, source URL stored and shown on the library card, variant
+  keeping the source, CORS-blocked URL with the clear message and a
+  working paste fallback, invalid URL, empty page, plain-text fetch,
+  200,000-char cap with a note, removing the link file, the real
+  reader service against https://example.com via r.jina.ai, Arabic
+  RTL, dark mode, 390px with no overflow, zero console errors
+  besides the browser's own CORS diagnostics for the deliberately
+  blocked fetches). Screenshots: docs/screenshots/url-en.png,
+  docs/screenshots/url-ar.png, docs/screenshots/url-library.png.
+
+## 2026-11-22 — True/false questions with justification (صح/خطأ مع التعليل)
+
+- **A new question type: True/False with a justification (تعليل)** —
+  the provider may now write True/False questions: a statement, the
+  correct answer, and a **justification** — a short explanation of
+  why the statement is true or false, grounded in the material.
+  The justification is a required field: the generation prompt asks
+  for it with a schema and an example, and a question that arrives
+  without one is repaired from its "explanation" when it has one,
+  or rejected (the whole generation fails with a clear message,
+  like an essay without a rubric). Imported JSON banks and
+  spreadsheet rows are repaired the same way, so older True/False
+  questions with an explanation still import.
+- **In the quiz, True/False shows as two choices** — True / False
+  in English, صح / خطأ in Arabic (the labels are UI chrome, so they
+  follow the UI language while the statement stays in the exam's
+  language). Right after answering, the justification appears in
+  its own highlighted blue box under the verdict, and it is shown
+  just as prominently in the results review for right and wrong
+  answers alike — the generic "Why:" explanation is never printed
+  twice next to it.
+- **Demo bank: 3 new True/False questions** (pointers / linked
+  list, verified against the existing demo facts): p++ on an int*
+  does not move one byte, head insertion is O(1), and delete does
+  not reset a pointer to nullptr — each with its justification, so
+  the type works end to end without an API key.
+- **Everywhere else the type travels, it holds up** — the
+  justification is on the flashcard back, in the print answer key
+  (with صح/خطأ labels), in the per-topic stats (type-agnostic, a
+  True/False attempt records like any other), and it is collected
+  and applied by one-tap exam translation; sharing a bank carries
+  it along as part of the exam JSON. TTS reads the True/False
+  labels in the UI language too.
+- 4 new i18n keys (English + Arabic); works in both languages and
+  in dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 52 checks passed (generation with justifications in
+  the prompt and in the saved exam, repair from "explanation",
+  rejection of a tf question with no reason at all, provider-500
+  and offline-free paths, quiz with صح/خطأ labels, justification
+  right after answering and in review, 50% scoring, stats
+  recording, flashcard backs, print answer key, share payload
+  round-trip, translation of the justification, demo tf questions
+  end to end without a key, Arabic RTL, dark mode, 390px with no
+  overflow, zero console errors). Screenshots: docs/screenshots/
+  tf-en.png, tf-ar.png.
+
+## 2026-11-22 — Chat with the material (Feature 1 of the new queue)
+
+- **"💬 Ask about this material" on every exam card in My exams** —
+  for exams that still carry their source material, one tap opens a
+  chat screen where the student asks questions about that material
+  and gets answers from their own provider (the same BYOK key as
+  exam generation). The button only appears where the material
+  exists: generated exams have it, imported, shared and demo exams
+  do not. A **"💬 Chat with material"** button in the library header
+  opens a fresh chat with no exam — upload files or paste text there.
+- **Answers are grounded, never invented** — the material is chunked
+  like generation does (~12,000 characters) and only the chunk(s)
+  most relevant to the question are sent, picked by word overlap
+  with the question (works for English and Arabic words). The
+  provider is told to answer ONLY from the material, to say so
+  clearly when the material does not contain the answer, and to
+  quote short passages; answers are shown with their quotes under a
+  "From the material:" label. The reply is JSON {"answer",
+  "quotes"}; a reply that is not JSON at all is shown as plain text
+  rather than dropped (Claude does not force JSON mode), while a
+  JSON reply with no usable answer shows a plain error instead of a
+  guessed answer. Follow-up questions keep the earlier exchanges as
+  context (last 3, truncated), so "and where does it happen?" works.
+- **Fresh material in the chat screen itself** — upload PDF (pdf.js,
+  lazily loaded), Word (.docx) or PowerPoint (.pptx) (JSZip, lazily
+  loaded) or text files, or paste text; the same readers as the
+  wizard, but kept in the chat's own state so the wizard's material
+  is untouched. Files can be removed again, and the material line
+  always shows the character count. Very long material is capped at
+  200,000 characters (the same cap as material stored with an exam),
+  with a plain note when the cap cuts it.
+- **Honest failure paths** — with no API key set, a clear banner on
+  the chat screen says so and sending shows the same message, and
+  nothing is generated; offline, or a provider error, shows a plain
+  message and the question stays in the history so it can be
+  re-sent. While an answer is coming, a "Thinking…" bubble shows
+  and the input and Send button are disabled.
+- **History is kept per exam** — messages are saved in localStorage
+  (qf-chat, last 30 per chat) and survive a reload; "Clear chat"
+  wipes one chat's history. Switching the UI language mid-chat
+  re-renders the screen with the history intact.
+- 33 new i18n keys (English + Arabic); works in both languages and
+  in dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 44 checks passed (chat button only on exams with
+  material, opening from an exam card, grounded answer with a
+  verbatim quote from the material, grounding instruction in the
+  provider prompt, follow-up exchange, history persists across
+  reload, clear chat, chunk relevance — a beta question sends the
+  beta chunk and drops the gamma chunk — no-key banner and no
+  provider call, offline and provider-500 paths, non-JSON reply
+  shown as plain text, fresh chat with .txt / pasted / .docx / PDF
+  uploads grounding answers, file removal, Arabic UI and RTL with a
+  grounded answer, dark mode, 390px with no overflow, zero console
+  errors).
+
+## 2026-11-22 — Past-exam analysis (Feature 2 of the new queue)
+
+- **"📈 Past-exam analysis" in My exams and on the Create exam tab**
+  — a dedicated screen where the student adds 2+ past exams (PDF,
+  Word .docx or text .txt / .md — the same readers as the chat
+  screen) and labels each one with its year in a free-text field
+  next to the file. Files can be removed again; adding or removing
+  an exam after an analysis clears the old result, so the table can
+  never describe exams that are no longer there.
+- **Two provider passes, same BYOK key as generation** — first, each
+  exam's topics are extracted from the exam text (one ~12,000-char
+  chunk per exam, JSON {"topics": [{"name", "description"}]}), then a
+  second pass merges topics that are the same idea in different
+  wording into one canonical topic and records which exams each
+  merged topic appears in. Frequency is plain counting on the merged
+  result — never a local guess at topics.
+- **Result: a ranked list, most-repeated first** — each row shows the
+  topic, a short description, how many exams it appeared in (e.g.
+  "3 of 4 exams") and the years it appeared in; ties sort
+  alphabetically so the order is stable.
+- **"⚡ Generate an exam focused on the most-repeated topics"** —
+  hands the wizard the past exams as material and the top topics
+  (those in at least 2 exams, up to 8 — or the top 5 if every topic
+  appeared only once) as focus notes, and opens the exam settings
+  step so the student checks count / difficulty / language before
+  generating. The old material summary is cleared with the material,
+  so a summary can never describe the wrong exams.
+- **Honest failure paths** — with no API key set, a clear banner on
+  the screen says so and analysing shows the same message and calls
+  nothing; fewer than 2 exams with text is refused with a plain
+  message and no provider call; a provider error or an unreadable
+  reply shows a plain error and no results. If the merge pass
+  itself fails, the analysis falls back to exact-name merging
+  (identical names only — never a guess that two wordings are the
+  same idea) instead of failing the whole analysis.
+- 34 new i18n keys (English + Arabic); works in both languages and
+  in dark mode, at 1280px and 390px. Screenshots:
+  docs/screenshots/past-en.png and past-ar.png.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 48 checks passed (entry buttons in the library header
+  and on wizard step 1, uploading PDF + .txt + .docx with year
+  fields, 4 extraction calls + 1 merge call, ranking correctness —
+  a topic in all 4 exams ranks above one in a single exam, with
+  alphabetical tie-breaking — provider merge joining "Genetic
+  Inheritance" into "Genetics" across years, focused-exam button
+  opening the settings step with the material and focus notes set
+  and the exam generating and saving, fewer-than-2 guard with no
+  provider call, file removal, provider-500 and non-JSON reply
+  errors, merge-failure fallback to exact-name merging, language
+  switch mid-screen keeping the results, no-key banner and no
+  provider call, Arabic UI and RTL with Arabic count chips, dark
+  mode, 390px with no overflow, zero console errors apart from the
+  two "Failed to load resource" lines the intentional mock 500s
+  cause).
+
 ## 2026-11-22 — One-tap fresh exam variant (Feature 3 of the new queue)
 
 - **"🔄 New variant" button on every exam card in My exams** — for
