@@ -4,6 +4,51 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — One-tap fresh exam variant (Feature 3 of the new queue)
+
+- **"🔄 New variant" button on every exam card in My exams** — for
+  exams that still carry their source material, one tap generates a
+  NEW exam from the same material with the same settings (question
+  count, types, difficulty, language, focus notes) but different
+  questions, and saves it as a separate exam in the library
+  ("Title (variant 2)", then 3, 4… — a variant of a variant keeps
+  counting up from the same base title). The button only appears
+  where the material exists: generated exams have it, imported,
+  shared and demo exams do not.
+- **The questions are genuinely different, not the same ones
+  reworded** — two layers: the provider is given the earlier
+  version's question stems and told not to repeat them (covering
+  other facts, details and angles instead), and generation dedupes
+  the new set against those stems afterwards. If the provider still
+  returns only repeats, nothing is saved and the student is told to
+  try again — a variant is never an empty or identical exam.
+- **Material and settings now travel with each generated exam** —
+  generation stores the full source text and a snapshot of the
+  settings it used, so a variant needs no re-upload and no
+  re-typing. Material over 200,000 characters is not stored (the
+  variant button simply does not appear for that exam), so one exam
+  can never eat the whole localStorage quota. The material summary
+  describes the material, not the questions, so it travels to the
+  variant unchanged; backups carry the material and settings too,
+  so a variant still works after a library restore.
+- **Honest failure paths** — offline, or with no API key set, the
+  button shows a plain message and generates nothing; a provider
+  error is shown in plain words and the button is re-enabled.
+  While a variant generates, its button is disabled ("Generating
+  variant…") and only one variant runs at a time.
+- 5 new i18n keys (English + Arabic); works in both languages and in
+  dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test against a local mock
+  provider — 40 checks passed (variant button only on exams with
+  material, variant 2 + variant 3 titles and numbering, new questions
+  differ from the parent, avoid-list in the provider prompt, material
+  + settings + summary travel to the variant, full variant quiz run
+  2/2, all-repeat provider refused with a plain message and nothing
+  saved, provider 500 and offline and no-key paths, wizard
+  generation stores material + settings, Arabic UI and RTL with a
+  "(نسخة 2)" title, dark mode, 390px with no overflow, zero console
+  errors).
+
 ## 2026-11-22 — Upload Word (.docx) and PowerPoint (.pptx) as material
 
 - **Word and PowerPoint join the dropzone** — step 1 now accepts

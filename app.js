@@ -41,6 +41,12 @@
      ZIP archives of XML, so no heavier reader is needed. */
   var JSZIP_URL = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
   var CHUNK_CHARS = 12000;
+  /* Fresh variant (Feature 3 of the new queue, 2026-11-22): the exam's
+     source material is stored with the exam so a new variant can be
+     generated from it later. Very long material is not stored — the
+     variant button simply does not appear for that exam — so one exam
+     can never eat the whole localStorage quota. */
+  var VARIANT_MATERIAL_MAX = 200000;
 
   var settings = loadSettings();   // { shuffle, perQTimer, perQSeconds, autoRead, speechRate }
   var selectedTopic = 'All';
@@ -118,6 +124,7 @@
   // material.files: [{name, size, kind: 'pdf'|'text'|'bank'|'docx'|'pptx', chars, pages?}]
   var byok = loadByok();    // {provider, apiKey, model, baseUrl, proxyUrl}
   var genState = { busy: false, error: '', progress: '', lastBank: null };
+  var variantBusy = false;   // one variant generation at a time
 
   /* Material summary (Feature 9): {keyPoints: [string], definitions:
      [{term, definition}]} generated from the same material with the
@@ -2643,25 +2650,33 @@
     return out;
   }
 
-  function buildPrompt(chunkText, nQuestions, chunkLabel) {
+  /* settings defaults to the wizard's current settings; a fresh variant
+     passes the settings stored with the exam instead, so the variant
+     keeps the same count, types, difficulty and language. avoid is an
+     optional list of question stems from an earlier version — the
+     provider is told not to repeat them, and generation also dedupes
+     against them afterwards, so a variant is a genuinely different
+     set of questions, not the same ones reworded. */
+  function buildPrompt(chunkText, nQuestions, chunkLabel, settings, avoid) {
+    var s = settings || wiz;
     var types = [];
-    if (wiz.types.mcq) types.push('multiple-choice questions with exactly 4 options');
-    if (wiz.types.tf) types.push('True/False questions with exactly 2 options: "True" and "False"');
-    if (wiz.types.essay) types.push('essay questions: a free-text question with a short grading rubric and a "maxScore" of 5');
-    if (wiz.types.fill) types.push('fill-in-the-blank questions: a sentence with exactly one blank written as ____, plus an "answers" array of accepted answers');
-    if (wiz.types.coding) types.push('coding questions in JavaScript ONLY: a programming task with "language" set to "JavaScript", "starterCode" (the code the student starts from), and "tests" (an array of objects with "input" — a JavaScript expression that calls the student\'s function, e.g. "sum(2, 3)" — and "expected" — the exact expected result as a string, e.g. "5"). Never use any other language.');
-    if (wiz.types.matching) types.push('matching questions: two columns to connect, with "pairs" (an array of 3–5 objects, each with "left" — a term — and "right" — its correct partner, e.g. a definition). The left and right values must each be unique within the question.');
-    if (wiz.types.ordering) types.push('ordering questions: a list of steps to put in order, with "items" (an array of 4–6 short strings in the CORRECT order, e.g. the steps of a process from first to last). Every item must be unique.');
+    if (s.types.mcq) types.push('multiple-choice questions with exactly 4 options');
+    if (s.types.tf) types.push('True/False questions with exactly 2 options: "True" and "False"');
+    if (s.types.essay) types.push('essay questions: a free-text question with a short grading rubric and a "maxScore" of 5');
+    if (s.types.fill) types.push('fill-in-the-blank questions: a sentence with exactly one blank written as ____, plus an "answers" array of accepted answers');
+    if (s.types.coding) types.push('coding questions in JavaScript ONLY: a programming task with "language" set to "JavaScript", "starterCode" (the code the student starts from), and "tests" (an array of objects with "input" — a JavaScript expression that calls the student\'s function, e.g. "sum(2, 3)" — and "expected" — the exact expected result as a string, e.g. "5"). Never use any other language.');
+    if (s.types.matching) types.push('matching questions: two columns to connect, with "pairs" (an array of 3–5 objects, each with "left" — a term — and "right" — its correct partner, e.g. a definition). The left and right values must each be unique within the question.');
+    if (s.types.ordering) types.push('ordering questions: a list of steps to put in order, with "items" (an array of 4–6 short strings in the CORRECT order, e.g. the steps of a process from first to last). Every item must be unique.');
     var typeText = types.join(' and ');
-    var diffText = wiz.difficulty === 'Mixed'
+    var diffText = s.difficulty === 'Mixed'
       ? 'a mix of Easy, Medium and Hard questions'
-      : wiz.difficulty + ' questions';
+      : s.difficulty + ' questions';
     var schema = 'Each question must have: "question" (string), "type" ("mcq", "tf", "essay", "fill", "coding", "matching" or "ordering"), ' +
       '"explanation" (string), "topic" (short string, e.g. a chapter or sub-topic), ' +
       '"difficulty" ("Easy", "Medium" or "Hard"). ' +
       'Multiple-choice and True/False questions ALSO need "options" (array of ' +
-      (wiz.types.mcq && wiz.types.tf ? '4 strings for multiple-choice or 2 strings ("True","False") for True/False' :
-        wiz.types.tf ? '2 strings: "True" and "False"' : '4 strings') +
+      (s.types.mcq && s.types.tf ? '4 strings for multiple-choice or 2 strings ("True","False") for True/False' :
+        s.types.tf ? '2 strings: "True" and "False"' : '4 strings') +
       ') and "answer" (0-based index of the correct option). ' +
       'Essay questions need "rubric" (a short grading rubric string) and "maxScore" (a number, use 5), ' +
       'and must NOT have "options" or "answer". ' +
@@ -2676,13 +2691,20 @@
       'Ordering questions need "items" (an array of 4–6 strings in the CORRECT order), and must NOT ' +
       'have "options" or "answer". ' +
       'Optionally "code" (a short code snippet string) only if the question is about code.';
+    var avoidText = '';
+    if (avoid && avoid.length) {
+      avoidText = ' Do NOT repeat any of these questions from an earlier version of this exam — ' +
+        'write different questions about the material instead, covering other facts, details and angles: ' +
+        avoid.map(function (q, i) { return (i + 1) + '. "' + q + '"'; }).join(' ');
+    }
     return 'You are an exam writer. Write ' + nQuestions + ' ' + typeText +
-      ' in ' + wiz.language + ' based ONLY on the material below' +
+      ' in ' + s.language + ' based ONLY on the material below' +
       (chunkLabel ? ' (' + chunkLabel + ')' : '') + '. ' +
       'Difficulty: ' + diffText + '.' +
-      (wiz.focus ? ' Focus notes from the teacher: ' + wiz.focus + '.' : '') +
+      (s.focus ? ' Focus notes from the teacher: ' + s.focus + '.' : '') +
       ' Every question must be answerable from the material, have exactly one correct answer, ' +
       'and include a short explanation of why the answer is correct.' +
+      avoidText +
       '\n\nReply with JSON ONLY — no markdown fences, no extra text. The JSON must be an object with a "questions" array. ' +
       schema +
       '\n\nMATERIAL:\n' + chunkText;
@@ -3112,7 +3134,21 @@
         count: deduped.length,
         provider: PROVIDERS[byok.provider].label,
         model: effectiveModel(),
-        bank: bank
+        bank: bank,
+        /* Fresh variant (2026-11-22): keep the source material and the
+           settings this exam was generated with, so a new variant can
+           be made from the same material later. Material over the cap
+           is not stored (see VARIANT_MATERIAL_MAX). */
+        material: fullText.length <= VARIANT_MATERIAL_MAX ? fullText : '',
+        gen: {
+          count: wiz.count,
+          difficulty: wiz.difficulty,
+          language: wiz.language,
+          focus: wiz.focus,
+          types: JSON.parse(JSON.stringify(wiz.types))
+        },
+        variant: 1,
+        baseTitle: title
       });
       saveLibrary(lib);
       genState.lastBank = bank;
@@ -3137,6 +3173,127 @@
       if (prog) prog.textContent = '';
       if (btn) btn.disabled = false;
       showGenError(plainError(e));
+    });
+  }
+
+  /* ---------- fresh exam variant (Feature 3 of the new queue) ----------
+     One tap in My exams generates a NEW exam from the same material
+     with the same settings (count, types, difficulty, language, focus)
+     but different questions, and saves it as a separate exam in the
+     library. Two things keep the questions different: the provider is
+     given the earlier version's question stems and told not to repeat
+     them, and generation dedupes against those stems afterwards. If
+     the provider still returns only repeats, nothing is saved and the
+     student is told to try again — a variant is never an empty or
+     identical exam. The material summary describes the material, not
+     the questions, so it travels to the variant unchanged. Like
+     generation it needs a key; with no key, or offline, a plain
+     message is shown instead. */
+  function showVariantError(errBox, msg) {
+    if (errBox) {
+      errBox.textContent = msg;
+      errBox.classList.add('show');
+    }
+  }
+
+  function generateVariant(entry, btn, errBox) {
+    if (variantBusy) return;
+    if (isOffline()) { showVariantError(errBox, t('offlineNeedNet')); return; }
+    if (!byok.apiKey) { showVariantError(errBox, t('errNeedKey')); return; }
+    var materialText = (entry.material || '').trim();
+    if (!materialText) { showVariantError(errBox, t('errNoMaterial')); return; }
+    /* Stored settings, or the wizard's current ones if an older entry
+       somehow has material without settings. */
+    var settings = entry.gen || {
+      count: wiz.count, difficulty: wiz.difficulty, language: wiz.language,
+      focus: wiz.focus, types: JSON.parse(JSON.stringify(wiz.types))
+    };
+    if (errBox) errBox.classList.remove('show');
+    variantBusy = true;
+    if (btn) { btn.disabled = true; btn.textContent = t('variantGenerating'); }
+
+    var chunks = splitChunks(materialText);
+    var totalWanted = settings.count;
+    var perChunk = chunks.map(function (c) {
+      return Math.max(1, Math.round(totalWanted * c.length / materialText.length));
+    });
+    /* Stems of the earlier version, truncated so the prompt stays
+       bounded even for a 50-question exam. */
+    var avoid = (entry.bank.questions || []).map(function (q) {
+      return String(q.question || '').trim().slice(0, 140);
+    }).filter(function (s) { return s !== ''; });
+    var prevTexts = {};
+    (entry.bank.questions || []).forEach(function (q) {
+      prevTexts[String(q.question || '').trim().toLowerCase()] = true;
+    });
+    var allQuestions = [];
+    var chain = Promise.resolve();
+    chunks.forEach(function (chunk, i) {
+      chain = chain.then(function () {
+        var label = chunks.length > 1 ? 'part ' + (i + 1) + ' of ' + chunks.length + ' of the material' : '';
+        return callProvider(buildPrompt(chunk, perChunk[i], label, settings, avoid), perChunk[i], 'gen');
+      }).then(function (raw) {
+        var qs = parseQuestionsResponse(raw, chunks.length > 1 ? 'part ' + (i + 1) : '');
+        allQuestions = allQuestions.concat(qs);
+      });
+    });
+
+    chain.then(function () {
+      // Dedupe within the new set AND against the earlier version.
+      var seen = {};
+      var deduped = allQuestions.filter(function (q) {
+        var k = String(q.question || '').trim().toLowerCase();
+        if (!k || seen[k] || prevTexts[k]) return false;
+        seen[k] = true;
+        return true;
+      });
+      if (!deduped.length) throw new Error(t('variantAllDup'));
+      shuffle(deduped);
+      var n = (entry.variant || 1) + 1;
+      var baseTitle = entry.baseTitle || entry.title;
+      var newTitle = t('variantTitle', { title: baseTitle, n: n });
+      var bank = {
+        title: newTitle,
+        subtitle: t('genSub', {
+          n: deduped.length,
+          provider: PROVIDERS[byok.provider].label,
+          model: effectiveModel(),
+          difficulty: localizedDifficulty(settings.difficulty),
+          language: localizedLanguage(settings.language)
+        }),
+        questions: deduped
+      };
+      if (entry.bank.summary) bank.summary = entry.bank.summary;
+      validate(bank);
+      var lib = loadLibrary();
+      lib.unshift({
+        id: 'gen-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+        title: newTitle,
+        subtitle: bank.subtitle,
+        date: new Date().toISOString().slice(0, 10),
+        count: deduped.length,
+        provider: PROVIDERS[byok.provider].label,
+        model: effectiveModel(),
+        bank: bank,
+        material: entry.material,
+        gen: settings,
+        variant: n,
+        baseTitle: baseTitle
+      });
+      saveLibrary(lib);
+      variantBusy = false;
+      renderLibrary();
+      /* renderLibrary() rebuilds the header, so the status box must be
+         looked up (and filled) after it, not before. */
+      var okBox = document.getElementById('backup-status');
+      if (okBox) {
+        okBox.textContent = t('variantReady', { title: newTitle, n: deduped.length });
+        okBox.classList.add('show');
+      }
+    }).catch(function (e) {
+      variantBusy = false;
+      if (btn) { btn.disabled = false; btn.textContent = t('variantBtn'); }
+      showVariantError(errBox, plainError(e));
     });
   }
 
@@ -3240,6 +3397,15 @@
       r.appendChild(shr);
       addFlashcardsButton(entry.bank, r);
       addReviewButton(entry.bank, r, false);
+      /* Fresh variant (2026-11-22): only for exams that still carry
+         their source material — generated exams do, imported / shared /
+         demo ones do not. */
+      var vErr = el('div', 'bank-error');
+      if (entry.material && entry.material.trim()) {
+        var varBtn = el('button', 'btn btn-secondary', t('variantBtn'));
+        varBtn.addEventListener('click', function () { generateVariant(entry, varBtn, vErr); });
+        r.appendChild(varBtn);
+      }
       var del = el('button', 'btn btn-secondary', t('libDelete'));
       del.addEventListener('click', function () {
         saveLibrary(loadLibrary().filter(function (x) { return x.id !== entry.id; }));
@@ -3247,6 +3413,7 @@
       });
       r.appendChild(del);
       card.appendChild(r);
+      card.appendChild(vErr);
       wrap.appendChild(card);
     });
 

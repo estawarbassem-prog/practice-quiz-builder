@@ -180,6 +180,7 @@ Every exam plays in the same engine:
   be answered correctly twice in a row to leave the queue, a wrong
   answer resets its streak to zero, and the streak is shown on every
   question. Reviewing never touches your saved exams or best score.
+- **Fresh exam variant** — a **🔄 New variant** button on every exam card in My exams (for exams that still carry their source material) generates a new exam from the same material with the same settings but different questions, saved as a separate exam ("Title (variant 2)", then 3, 4…). The provider is told not to repeat the earlier version's questions, and the new set is deduped against them too — if it still comes out identical, nothing is saved.
 - **Flashcards** — a **🃏 Flashcards** button on every exam card, the exam start screen and the
   results screen opens a quick-revision deck built from the exam's own questions: tap a card (or
   press Space) to flip it and check the answer and explanation on the back. No score, no timer.
