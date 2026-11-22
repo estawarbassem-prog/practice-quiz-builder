@@ -4,6 +4,15 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-22 — README simplified
+
+- **README cut from 359 lines to 174: screenshots do the talking now.**
+  Every feature is one short line instead of 2–4 weighty paragraphs;
+  the question-bank format (with all JSON examples) moved to
+  `docs/question-bank-format.md`, linked from the README in one line;
+  the Arabic section is a short paragraph instead of a full mirror.
+  All 41 screenshots stay in place, unchanged.
+
 ## 2026-11-22 — Phase 3: project description + screenshots
 
 - **README rewritten: 359 lines (was 656), concise but substantive.**
