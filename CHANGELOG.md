@@ -4,6 +4,50 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-23 — Exam built from your mistakes only (Feature 5 of the new queue)
+
+- **"🎯 Exam from my mistakes ({n})" on the Stats screen and in the
+  My exams header** — one tap builds a real exam in the library from
+  every question still sitting in the smart-review queue, across ALL
+  exams (the demo bank included). No provider call, no API key: the
+  questions already exist, they are just collected. The button only
+  shows when there are mistakes to build from, with the count.
+- **One mistakes exam at a time** — building again replaces the old
+  one, so the library never fills up with stale copies. Questions
+  are deduped by content, so the same question in two exams appears
+  once. Queue entries for exams that were deleted are skipped, and
+  pruned when an exam is built.
+- **Mastering flows back to the exam the question came from** — a
+  correct answer inside the mistakes exam counts toward the source
+  exam's 2-in-a-row streak, and the results screen says plainly how
+  many questions just left the mistakes queue for good
+  ("✓ Mastered 1 question(s)…"). A wrong answer resets the streak,
+  like a review session. Ungraded answers (essay/oral with no key)
+  never touch a streak, and a results-screen re-render can never
+  count the same answers twice.
+- **Mastery is global across copies** — the same question in two
+  exams shares one queue entry by content: mastering it in one exam
+  clears it from the other too, so the next mistakes exam never
+  re-asks a question the student already proved they know. (Found
+  by the smoke test: the first build only cleared the copy in the
+  exam it came from, and a stale copy came back.)
+- The mistakes exam is a normal exam otherwise: topics, strict mode,
+  oral mode, print, answer sheet, flashcards, share link, and the
+  review button all work on it; its card in My exams is tagged
+  "Built from your mistakes". 7 new i18n keys (English + Arabic);
+  works in both languages and in dark mode, at 1280px and 390px.
+- Verified with a headless-Chrome smoke test — 36 checks passed
+  (i18n parity 616 EN == 616 AR, Stats + library buttons with the
+  deduped count of 3, build + rebuild replacing instead of
+  duplicating, orphan pruning, full 3-question run 2/3 with the
+  mastered line, source-queue updates verified per question,
+  re-render guard after a language switch, empty state with a plain
+  message and no buttons, Arabic UI and RTL, 390px with no
+  overflow, zero console errors). Screenshots:
+  docs/screenshots/stats-en.png, mistakes-en.png, mistakes-ar.png.
+  No provider call was made — the feature is fully local. Service
+  worker cache bumped v4 → v5 for the changed app shell.
+
 ## 2026-11-22 — Repo styling: banner + topics
 
 - **Banner added at the top of the README** (`docs/banner.png`,

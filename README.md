@@ -37,9 +37,9 @@ Upload PDFs, past exams, slides or notes, add **your own** AI key, and get a rea
 |---|---|---|---|
 | ![Results](docs/screenshots/results.png) | ![Smart review of mistakes](docs/screenshots/review.png) | ![Stats dashboard](docs/screenshots/stats.png) | ![Flashcards](docs/screenshots/flashcards.png) |
 
-| Cheat sheet | Chat with the material | Past-exam analysis |
-|---|---|---|
-| ![Cheat sheet from mistakes](docs/screenshots/cheat-en.png) | ![Chat with the material](docs/screenshots/chat-en.png) | ![Past-exam analysis](docs/screenshots/past-en.png) |
+| Cheat sheet | Chat with the material | Past-exam analysis | Exam from mistakes |
+|---|---|---|---|
+| ![Cheat sheet from mistakes](docs/screenshots/cheat-en.png) | ![Chat with the material](docs/screenshots/chat-en.png) | ![Past-exam analysis](docs/screenshots/past-en.png) | ![Exam from your mistakes](docs/screenshots/mistakes-en.png) |
 
 ### Share, print & reuse
 
@@ -92,6 +92,7 @@ Upload PDFs, past exams, slides or notes, add **your own** AI key, and get a rea
 
 **Learn from it**
 - Smart review: missed questions return until you get them right twice in a row.
+- Exam from your mistakes: one exam built from every question you still get wrong, across all your exams — no key needed.
 - Cheat sheet: one page built from your mistakes, stored with the attempt.
 - Stats: per-topic accuracy, last 8 attempts, newest 50 kept.
 - Flashcards: built from any exam's questions, no provider calls.

@@ -6,7 +6,7 @@
    the user's API key lives only in their own browser's localStorage and is
    sent only to the provider they choose. */
 /* Sections (in file order): helpers - validation - question types -
-   persistence - smart review - flashcards - views/navigation - wizard
+   persistence - smart review - exam from mistakes - flashcards - views/navigation - wizard
    (steps 1-4) - provider calls - translation - generation - summary -
    variant - chat - past-exam analysis - library & backup - print -
    cheat sheet - stats - share - settings panel - quiz engine (timers,
@@ -689,24 +689,59 @@
 
   /* Record one review answer: correct bumps the streak, wrong resets
      it to 0; at REV_NEEDED the question is mastered and drops out.
-     Returns {streak, mastered}. */
-  function recordReviewAnswer(bank, q, correct) {
+     Returns {streak, mastered}. The by-key form lets the mistakes
+     exam (2026-11-23) update the SOURCE bank's queue: a question
+     mastered inside the mistakes exam must leave the queue of the
+     exam it came from, not just the mistakes exam's own queue.
+     A question is keyed by its content (qId), so the same question
+     can sit in several banks' queues at once (e.g. a copy in an
+     imported bank). The update therefore applies to EVERY bank
+     whose queue holds that qId — otherwise mastering it in one
+     exam would leave a stale copy queued in another, and the next
+     mistakes exam would ask it again. */
+  function recordReviewAnswerByKey(key, q, correct) {
     var d = loadReview();
-    var key = bankKey(bank);
-    var e = d[key];
-    if (!e || !e.items) return { streak: 0, mastered: false };
     var id = qId(q);
-    var item = e.items[id];
-    if (!item) return { streak: 0, mastered: false };
-    var mastered = false;
-    if (correct) {
-      item.streak = Math.min((item.streak || 0) + 1, REV_NEEDED);
-      if (item.streak >= REV_NEEDED) { delete e.items[id]; mastered = true; }
-    } else {
-      item.streak = 0;
+    var out = { streak: 0, mastered: false };
+    var anyMastered = false;
+    var sawKey = false;
+    Object.keys(d).forEach(function (k) {
+      var e = d[k];
+      if (!e || !e.items || !e.items[id]) return;
+      var item = e.items[id];
+      var mastered = false;
+      if (correct) {
+        item.streak = Math.min((item.streak || 0) + 1, REV_NEEDED);
+        if (item.streak >= REV_NEEDED) { delete e.items[id]; mastered = true; }
+      } else {
+        item.streak = 0;
+      }
+      if (mastered) anyMastered = true;
+      if (k === key) {
+        sawKey = true;
+        out = { streak: mastered ? REV_NEEDED : (item.streak || 0), mastered: mastered };
+      }
+    });
+    /* Mastery is global: if the question reached REV_NEEDED in any
+       bank, it is mastered — delete its copy from every other bank
+       too, so the next mistakes exam never re-asks a question the
+       student already proved they know. (Streaks stay per-bank
+       until then: a copy that only got one correct answer so far
+       still needs its second.) The caller reports mastered too
+       when its own bank held the question — it did answer it
+       correctly, and the question is gone from every queue. */
+    if (anyMastered) {
+      Object.keys(d).forEach(function (k) {
+        if (d[k] && d[k].items) delete d[k].items[id];
+      });
+      if (sawKey) { out.mastered = true; out.streak = REV_NEEDED; }
     }
     saveReview(d);
-    return { streak: mastered ? REV_NEEDED : (item.streak || 0), mastered: mastered };
+    return out;
+  }
+
+  function recordReviewAnswer(bank, q, correct) {
+    return recordReviewAnswerByKey(bankKey(bank), q, correct);
   }
 
   function reviewStreak(bank, q) {
@@ -799,6 +834,118 @@
     reviewCountFor: reviewCountFor, reviewTotalCount: reviewTotalCount,
     startReview: startReview, clearReviewFor: clearReviewFor,
     needed: REV_NEEDED
+  };
+
+  /* ---------- exam from your mistakes only (Feature 5 of the new queue, 2026-11-23) ----------
+     A real exam in the library, built from every question still
+     sitting in the smart-review queue — across ALL exams (the demo
+     bank included), not just one. No provider call, no key: the
+     questions already exist, they are just collected.
+     - One mistakes exam at a time: building again replaces the old
+       one, so the library never fills up with stale copies.
+     - Questions are deep-copied and deduped by qId, so the same
+       question in two exams appears once.
+     - bank.mistakesFrom maps each question index to the bankKey it
+       came from, so a correct answer inside this exam counts toward
+       mastering in the SOURCE exam's queue (see showResults) — the
+       2-in-a-row rule is the same as review sessions.
+     - Queue entries whose exam was deleted are orphans: they are
+       skipped, and pruned when an exam is actually built. */
+  function collectMistakes() {
+    var review = loadReview();
+    var banks = [];
+    if (sampleQuiz) banks.push(sampleQuiz);
+    loadLibrary().forEach(function (e) { if (e.bank && e.bank.questions) banks.push(e.bank); });
+    var byKey = {};
+    banks.forEach(function (b) { byKey[bankKey(b)] = b; });
+    var seen = {};
+    var questions = [];
+    var from = [];
+    var orphans = [];
+    var sources = {};
+    Object.keys(review).forEach(function (key) {
+      var bank = byKey[key];
+      if (!bank || !bank.questions) { orphans.push(key); return; }
+      var items = (review[key].items) || {};
+      bank.questions.forEach(function (q) {
+        var id = qId(q);
+        if (!items[id] || seen[id]) return;
+        seen[id] = true;
+        sources[key] = true;
+        questions.push(trDeepCopy(q));
+        from.push({ bankKey: key, qid: id });
+      });
+    });
+    return { questions: questions, from: from, orphans: orphans,
+      sources: Object.keys(sources).length };
+  }
+
+  function mistakesCount() {
+    return collectMistakes().questions.length;
+  }
+
+  /* Build (or rebuild) the mistakes exam and open its start screen.
+     Returns false when there is nothing to build from. */
+  function buildMistakesExam() {
+    var got = collectMistakes();
+    if (!got.questions.length) {
+      showToast(t('mistakesEmpty'));
+      return false;
+    }
+    /* Prune queue entries for exams that no longer exist — they
+       could never be resolved into questions again. */
+    if (got.orphans.length) {
+      var d = loadReview();
+      got.orphans.forEach(function (k) { delete d[k]; });
+      saveReview(d);
+    }
+    var title = t('mistakesTitle', { date: todayStr() });
+    var bank = {
+      title: title,
+      subtitle: t('mistakesSub', { n: got.questions.length, m: got.sources }),
+      questions: got.questions,
+      mistakesFrom: got.from
+    };
+    validate(bank);
+    var lib = loadLibrary().filter(function (e) { return e.provider !== 'mistakes'; });
+    lib.unshift({
+      id: newId('mistakes'),
+      title: title,
+      subtitle: bank.subtitle,
+      date: todayStr(),
+      count: got.questions.length,
+      provider: 'mistakes',
+      model: '',
+      bank: bank
+    });
+    if (!saveLibrary(lib)) {
+      showToast(t('errSaveFailed'), true);
+      return false;
+    }
+    loadBank(bank);
+    showStart(t('mistakesBuilt', { n: got.questions.length, m: got.sources }));
+    return true;
+  }
+
+  /* One "Exam from my mistakes" button (with count) appended to a
+     button row, only when there are mistakes to build from — the
+     same pattern as addReviewButton. */
+  function addMistakesButton(rowEl) {
+    var n = mistakesCount();
+    if (!n) return null;
+    var b = el('button', 'btn btn-secondary', t('mistakesBtn', { n: n }));
+    b.type = 'button';
+    b.id = 'mistakes-btn';
+    b.addEventListener('click', function () { buildMistakesExam(); });
+    rowEl.appendChild(b);
+    return b;
+  }
+
+  /* Debug/test handle for the mistakes exam. */
+  window.__qfMistakes = {
+    collectMistakes: collectMistakes,
+    buildMistakesExam: buildMistakesExam,
+    mistakesCount: mistakesCount
   };
 
   /* ---------- flashcards (Feature 7: quick revision) ----------
@@ -4944,6 +5091,9 @@
     pastBtn.id = 'past-btn';
     pastBtn.addEventListener('click', function () { openPastAnalysis(); });
     row.appendChild(pastBtn);
+    /* Exam from mistakes only (Feature 5, 2026-11-23): one exam
+       from every queued mistake, across all exams — no key needed. */
+    addMistakesButton(row);
     var impLbl = el('label', 'file-label', t('libImport'));
     var impInput = document.createElement('input');
     impInput.type = 'file';
@@ -5012,7 +5162,8 @@
       card.appendChild(el('h3', null, entry.title));
       card.appendChild(el('p', 'muted',
         t('qCount', { n: entry.count }) + ' · ' + entry.date +
-        (entry.provider && entry.provider !== 'import' && entry.provider !== 'shared' ? ' · ' + entry.provider + (entry.model ? ' (' + entry.model + ')' : '') : ' · ' + t('libImported'))));
+        (entry.provider === 'mistakes' ? ' · ' + t('mistakesCardTag')
+          : (entry.provider && entry.provider !== 'import' && entry.provider !== 'shared' ? ' · ' + entry.provider + (entry.model ? ' (' + entry.model + ')' : '') : ' · ' + t('libImported')))));
       /* Generate from a link (2026-11-22): show where the questions
          came from. The href is only used for http(s) URLs. */
       if (entry.sourceUrl && /^https?:\/\//i.test(entry.sourceUrl)) {
@@ -5888,6 +6039,11 @@
     grid.appendChild(statCard(t('statsAvgScore'), avgPct + '%'));
     grid.appendChild(statCard(t('statsAvgTime'), t('statsAvgSec', { s: avgSecs.toFixed(1) })));
     head.appendChild(grid);
+    /* Exam from mistakes only (Feature 5, 2026-11-23): the mistakes
+       live here in the stats, so the button belongs here too. */
+    var mRow = el('div', 'btnrow');
+    addMistakesButton(mRow);
+    if (mRow.childNodes.length) head.appendChild(mRow);
     wrap.appendChild(head);
 
     /* Per-topic accuracy, best first. */
@@ -8491,6 +8647,25 @@
     if (!run.statsRecorded) {
       run.statsRecorded = true;
       run.attemptId = 'a' + Date.now().toString(36);
+      /* Mistakes exam (2026-11-23): each graded answer also counts
+         in the SOURCE exam's review queue, so a question answered
+         correctly twice in a row — here or in a review session —
+         leaves the mistakes for good. Ungraded answers (essay/oral
+         with no key) never touch a streak. Inside the
+         statsRecorded guard, so a re-render of this screen can
+         never count the same answers twice. */
+      var masteredNow = 0;
+      if (quiz.mistakesFrom) {
+        run.qIndexes.forEach(function (qi, pos) {
+          var a = run.answers[pos];
+          if (!a || a.correct === null || a.correct === undefined) return;
+          var src = quiz.mistakesFrom[qi];
+          if (!src) return;
+          var r = recordReviewAnswerByKey(src.bankKey, quiz.questions[qi], !!a.correct);
+          if (r.mastered) masteredNow++;
+        });
+      }
+      run.mistakesMastered = masteredNow;
       recordAttempt({
       id: run.attemptId,
       ts: Date.now(),
@@ -8532,6 +8707,11 @@
     }
     ringWrap.appendChild(side);
     card.appendChild(ringWrap);
+    /* Mistakes exam (2026-11-23): say plainly which questions just
+       left the mistakes queue for good. */
+    if (run.mistakesMastered) {
+      card.appendChild(el('p', 'bank-note', t('mistakesMastered', { n: run.mistakesMastered })));
+    }
 
     var reviewTitle = el('h2', 'review-title', t('resReview'));
     card.appendChild(reviewTitle);

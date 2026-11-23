@@ -458,6 +458,14 @@
       revBackTopics: 'Back to exam',
       revClear: 'Clear review queue',
       revCleared: 'Review queue cleared.',
+      /* --- exam from your mistakes only (Feature 5, 2026-11-23) --- */
+      mistakesBtn: '🎯 Exam from my mistakes ({n})',
+      mistakesTitle: 'Mistakes exam ({date})',
+      mistakesSub: '{n} questions you got wrong — from {m} exam(s). No key needed: the questions are already yours.',
+      mistakesEmpty: 'No mistakes to build from yet — take a quiz first, or master the ones already queued.',
+      mistakesBuilt: '✓ Mistakes exam ready: {n} questions from {m} exam(s). Answer one correctly twice in a row and it leaves your mistakes for good.',
+      mistakesMastered: '✓ Mastered {n} question(s) in this exam — they left your mistakes queue.',
+      mistakesCardTag: 'Built from your mistakes',
       revProgress: 'Mastered {done} of {total} in this session',
       /* --- flashcards (quick revision) --- */
       fcBtn: '🃏 Flashcards',
@@ -1099,6 +1107,14 @@
       revBackTopics: 'عودة إلى الامتحان',
       revClear: 'مسح قائمة المراجعة',
       revCleared: 'تم مسح قائمة المراجعة.',
+      /* --- امتحان من أخطائك بس (الميزة 5، 2026-11-23) --- */
+      mistakesBtn: '🎯 امتحان من أخطائك ({n})',
+      mistakesTitle: 'امتحان الأخطاء ({date})',
+      mistakesSub: '{n} سؤال غلطت فيهم — من {m} امتحان. من غير مفتاح: الأسئلة دي بتاعتك أصلًا.',
+      mistakesEmpty: 'مفيش أخطاء تبني منها امتحان لسه — جاوب على امتحان الأول، أو أتقن اللي في القائمة.',
+      mistakesBuilt: '✓ امتحان الأخطاء جاهز: {n} سؤال من {m} امتحان. جاوب السؤال صح مرتين ورا بعض وهيخرج من أخطائك نهائيًا.',
+      mistakesMastered: '✓ أتقنت {n} سؤال في الامتحان ده — خرجوا من قائمة أخطائك.',
+      mistakesCardTag: 'مبني من أخطائك',
       revProgress: 'أتقنت {done} من {total} في هذه الجلسة',
       /* --- بطاقات المراجعة (مراجعة سريعة) --- */
       fcBtn: '🃏 بطاقات المراجعة',

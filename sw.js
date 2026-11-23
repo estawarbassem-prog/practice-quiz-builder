@@ -6,7 +6,7 @@
    still fail loudly (and honestly) when offline. */
 'use strict';
 
-var CACHE_VERSION = 'v4';   // bumped 2026-11-22 (phase 2, worker 5): app.js changed (shared status-box/id/date helpers, section map, variant-error toast fallback), so the shell must be re-cached
+var CACHE_VERSION = 'v5';   // bumped 2026-11-23 (mistakes exam): app.js changed (mistakes-exam section, review-answer sync, results mastery line), so the shell must be re-cached
 var CACHE_NAME = 'quizforge-' + CACHE_VERSION;
 
 var SHELL = [
