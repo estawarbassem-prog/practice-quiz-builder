@@ -1,25 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
-<title id="title">QuizForge: your material, your practice space</title>
-<desc id="desc">A warm paper and blue banner showing the four steps: add material, connect your AI, shape the exam, and practice and review.</desc>
-<rect width="1200" height="480" rx="24" fill="#f5f2eb"/>
-<g font-family="Arial,sans-serif">
-<rect x="56" y="50" width="48" height="48" rx="13" fill="#1668e8"/>
-<text x="80" y="84" fill="white" font-size="32" text-anchor="middle" font-weight="700">?</text>
-<text x="120" y="84" fill="#1e1b16" font-size="30" font-weight="700">QuizForge</text>
-<text x="56" y="167" fill="#1e1b16" font-size="48" font-weight="700">Your material.</text>
-<text x="56" y="225" fill="#1e1b16" font-size="48" font-weight="700">Your practice space.</text>
-<text x="56" y="275" fill="#5d6370" font-size="22">Turn notes, slides and past papers into practice.</text>
-<rect x="56" y="324" width="279" height="48" rx="12" fill="#1668e8"/>
-<text x="195" y="355" fill="white" font-size="18" text-anchor="middle" font-weight="700">English + Arabic</text>
-<text x="56" y="425" fill="#5d6370" font-size="17">No sign-up. No build step. Your choice of AI.</text>
-<rect x="720" y="50" width="424" height="380" rx="22" fill="white" stroke="#dadde3"/>
-<text x="750" y="96" fill="#1668e8" font-size="15" font-weight="700" letter-spacing="2">FROM MATERIAL TO MASTERY</text>
-<g font-size="19" fill="#1e1b16" font-weight="700">
-<circle cx="771" cy="150" r="20" fill="#edf3ff"/><text x="771" y="157" text-anchor="middle" fill="#1668e8">1</text><text x="810" y="157">Add your material</text>
-<path d="M771 178v28" stroke="#dadde3" stroke-width="2"/>
-<circle cx="771" cy="228" r="20" fill="#edf3ff"/><text x="771" y="235" text-anchor="middle" fill="#1668e8">2</text><text x="810" y="235">Connect your AI</text>
-<path d="M771 256v28" stroke="#dadde3" stroke-width="2"/>
-<circle cx="771" cy="306" r="20" fill="#edf3ff"/><text x="771" y="313" text-anchor="middle" fill="#1668e8">3</text><text x="810" y="313">Shape the exam</text>
-<path d="M771 334v15" stroke="#dadde3" stroke-width="2"/>
-<circle cx="771" cy="377" r="20" fill="#1668e8"/><text x="771" y="384" text-anchor="middle" fill="white">4</text><text x="810" y="384">Practice. Review. Repeat.</text>
-</g></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 420" role="img" aria-label="QuizForge: study smarter, remember longer">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#15103F"/><stop offset=".6" stop-color="#2C1D9A"/><stop offset="1" stop-color="#5B3DF5"/></linearGradient>
+<linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8B73FF"/><stop offset="1" stop-color="#4829DE"/></linearGradient>
+<radialGradient id="glow" cx=".85" cy="0" r=".6"><stop offset="0" stop-color="#C5F536" stop-opacity=".35"/><stop offset="1" stop-color="#C5F536" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="1200" height="420" rx="28" fill="url(#bg)"/><rect width="1200" height="420" rx="28" fill="url(#glow)"/>
+<g stroke="#fff" stroke-opacity=".06"><path d="M0 70H1200M0 140H1200M0 210H1200M0 280H1200M0 350H1200M100 0V420M200 0V420M300 0V420M400 0V420M500 0V420M600 0V420M700 0V420M800 0V420M900 0V420M1000 0V420M1100 0V420"/></g>
+<rect x="72" y="64" width="64" height="64" rx="18" fill="url(#lg)"/><circle cx="102" cy="94" r="14" fill="none" stroke="#fff" stroke-width="5"/><path d="M111 104l13 13" stroke="#C5F536" stroke-width="7" stroke-linecap="round"/><path d="M95 95l4 4 8-9" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="156" y="108" font-family="Segoe UI, Arial, sans-serif" font-size="34" font-weight="800" fill="#fff">QuizForge</text>
+<text x="72" y="214" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="800" fill="#fff" letter-spacing="-2">Study smarter.</text>
+<text x="72" y="286" font-family="Segoe UI, Arial, sans-serif" font-size="64" font-weight="800" fill="#C5F536" letter-spacing="-2">Remember longer.</text>
+<text x="72" y="340" font-family="Segoe UI, Arial, sans-serif" font-size="22" fill="#fff" fill-opacity=".82">Notes, slides and past papers in. Practice exams out. English and العربية.</text>
+<g transform="translate(800 70)"><rect width="330" height="270" rx="26" fill="#fff"/><rect x="26" y="26" width="120" height="26" rx="13" fill="#EEEBFF"/><rect x="26" y="74" width="250" height="16" rx="8" fill="#16143A"/><rect x="26" y="102" width="190" height="16" rx="8" fill="#16143A"/>
+<rect x="26" y="140" width="278" height="38" rx="14" fill="#fff" stroke="#E0DEF2"/><rect x="26" y="188" width="278" height="38" rx="14" fill="#EEEBFF" stroke="#5B3DF5"/><circle cx="48" cy="207" r="10" fill="#5B3DF5"/><path d="M43 207l4 4 7-8" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/><rect x="70" y="203" width="150" height="9" rx="4.5" fill="#5B3DF5" fill-opacity=".5"/><rect x="26" y="236" width="140" height="10" rx="5" fill="#E2DFF6"/><rect x="26" y="236" width="86" height="10" rx="5" fill="#5B3DF5"/></g>
+</svg>
