@@ -6,13 +6,14 @@
    still fail loudly (and honestly) when offline. */
 'use strict';
 
-var CACHE_VERSION = 'v5';   // bumped 2026-11-23 (mistakes exam): app.js changed (mistakes-exam section, review-answer sync, results mastery line), so the shell must be re-cached
+var CACHE_VERSION = 'v6';   // Visual refresh: re-cache the updated shell, copy and styles.
 var CACHE_NAME = 'quizforge-' + CACHE_VERSION;
 
 var SHELL = [
   './',
   'index.html',
   'app.js',
+  'polish.js',
   'i18n.js',
   'style.css',
   'questions.json',
