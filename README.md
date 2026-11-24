@@ -6,7 +6,7 @@ Turn notes, slides and past papers into practice exams, then learn from the ques
 
 [Get started](#get-started) · [What you can do](#what-you-can-do) · [Privacy & limitations](#privacy--limitations) · [العربية](#العربية)
 
-![QuizForge: a calm workspace for creating practice exams](preview.png)
+![QuizForge: your material, your practice space](preview.svg)
 
 **No sign-up · No build step · Your choice of AI provider · MIT licensed**
 
@@ -53,7 +53,7 @@ Switch language from the header. The Arabic interface uses right-to-left layouts
 <details>
 <summary>Explore the feature screenshot gallery</summary>
 
-These captures document the existing feature flows. Some show the earlier visual theme; the preview above shows the current create screen.
+These captures document the existing feature flows. Some show the earlier visual theme; the banner above introduces the current workflow.
 
 | Take an exam | Review results | Use Arabic |
 | --- | --- | --- |
