@@ -1,3 +1,11 @@
+# Visual refresh · 2026-11-24
+
+- Refined the warm paper and blue theme with lighter borders, clearer type and responsive navigation.
+- Simplified the upload screen with expandable webpage and spreadsheet options.
+- Refreshed English and Arabic onboarding copy and preserved the existing practice features.
+- Reorganized the README around quick start, capabilities, privacy and contribution guidance.
+- Bumped the offline shell cache to v6. Deployment settings are unchanged.
+
 # Changelog
 
 All notable changes to QuizForge, newest first.
