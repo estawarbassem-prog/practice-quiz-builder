@@ -138,7 +138,7 @@ python3 -m http.server 8000
 
 Then open <http://localhost:8000>. Or press **Take the demo exam** in **My exams** — no key needed.
 
-Free on GitHub Pages: push this folder to a public repo → **Settings → Pages** → **Deploy from a branch**, branch `main`, folder `/ (root)`.
+Free on GitHub Pages: push this folder to a public repo → **Settings → Pages** → **Deploy from a branch**, branch `main`, folder `/ (root)`. Or pick **GitHub Actions** as the source instead — the included workflow (`.github/workflows/pages.yml`) then runs the repo checks on every push to `main` and deploys only when they pass.
 
 ## Question-bank format
 
@@ -152,7 +152,8 @@ app.js                — wizard, providers, generation, library, quiz engine
 i18n.js               — English + Arabic strings (600+ keys)
 style.css             — styling: beige identity, dark mode, responsive
 questions.json        — demo bank (16 C pointers / linked-list questions)
-sw.js                 — service worker (quizforge-v4)
+sw.js                 — service worker (offline app shell, versioned cache)
+tests/check.mjs       — repo checks: bank validity, en/ar parity, referenced files
 docs/screenshots/     — real screenshots of the app
 CHANGELOG.md          — what changed in each update
 LICENSE               — MIT
@@ -161,6 +162,14 @@ LICENSE               — MIT
 ## Contributing
 
 Pull requests welcome. New questions should match the sample bank's bar: every answer checked, four options for MCQ, a `topic`, and a real explanation. See [CHANGELOG.md](CHANGELOG.md) for the history.
+
+Run the repo checks before opening a PR — no dependencies, no build step:
+
+```bash
+node tests/check.mjs
+```
+
+They validate the demo bank against the same rules the app enforces, check English/Arabic string parity (placeholders included), and make sure every file the app, the README, the manifest and the service worker reference actually exists.
 
 ## License
 

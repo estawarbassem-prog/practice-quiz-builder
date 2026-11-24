@@ -4,6 +4,23 @@ All notable changes to QuizForge, newest first.
 The tool is improved in small daily batches — one focused set of features
 per day, each verified before it ships.
 
+## 2026-11-24 — Repo checks + auto-deploy to GitHub Pages
+
+- **`tests/check.mjs` — dependency-free repo checks** (`node tests/check.mjs`).
+  They validate `questions.json` against the same per-type rules the app's
+  `validate()` enforces (MCQ answer range, true/false justification, essay
+  rubric, fill-in blanks, matching uniqueness, ordering duplicates, coding
+  tests), verify English/Arabic string parity in `i18n.js` — keys AND
+  `{placeholder}` tokens — and confirm every file referenced by
+  `index.html`, the README, the PWA manifest and the service worker's
+  cache list actually exists. No npm install, no build step.
+- **GitHub Actions Pages workflow** (`.github/workflows/pages.yml`):
+  every push to `main` runs the checks and deploys to GitHub Pages only
+  when they pass, so a broken bank or a missing screenshot can never ship.
+  One-time setup: repo Settings → Pages → Source: "GitHub Actions".
+- **README**: project structure and contributing notes updated; the stale
+  service-worker version label is gone so it can't drift again.
+
 ## 2026-11-23 — Exam built from your mistakes only (Feature 5 of the new queue)
 
 - **"🎯 Exam from my mistakes ({n})" on the Stats screen and in the
