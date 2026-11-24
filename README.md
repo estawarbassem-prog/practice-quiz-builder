@@ -1,18 +1,27 @@
 # QuizForge
 
-### Your material. Your practice space.
+![QuizForge: study smarter, remember longer](preview.svg)
 
-Turn notes, slides and past papers into practice exams, then learn from the questions you miss. Built with plain JavaScript, with a complete **English / العربية** interface.
+**Turn notes, slides and past papers into practice exams. Then drill what you miss until it sticks.**
 
-[Get started](#get-started) · [What you can do](#what-you-can-do) · [Privacy & limitations](#privacy--limitations) · [العربية](#العربية)
+[Use it online](https://estawarbassem-prog.github.io/practice-quiz-builder/) · [Run it locally](#run-it-locally) · [What's inside](#whats-inside) · [Privacy & limits](#privacy--limitations) · [العربية](#العربية)
 
-![QuizForge: your material, your practice space](preview.svg)
+No sign-up. No build step. No backend. Your exams stay in your browser, and you choose the AI provider. English and Arabic (right-to-left) throughout, light and dark, phone to desktop. MIT licensed.
 
-**No sign-up · No build step · Your choice of AI provider · MIT licensed**
+| Build | Practice | Review |
+| --- | --- | --- |
+| ![Build screen](docs/screenshots/studio-build.png) | ![Practice screen](docs/screenshots/studio-quiz.png) | ![Library screen](docs/screenshots/studio-library.png) |
 
-## Get started
+## How it works
 
-Clone or download the repository, then serve the folder locally:
+1. **Build.** Drop in PDF, Word, PowerPoint or text, paste notes, or import a webpage. Already have questions? Import JSON or CSV/XLSX and skip the AI step.
+2. **Connect a provider.** Use your own Gemini, OpenAI, Claude or OpenAI-compatible key. Pick question types, difficulty, language and focus.
+3. **Practice.** Multiple choice, true/false, fill-in, essays, matching, ordering and sandboxed coding tasks, with timers, strict mode and read-aloud.
+4. **Review.** Missed questions come back through smart review, flashcards and a mistake-based exam. Progress shows accuracy by topic.
+
+Try it with no key at all: open **Library** and take the built-in demo exam (16 C pointers and linked-list questions).
+
+## Run it locally
 
 ```bash
 git clone https://github.com/estawarbassem-prog/practice-quiz-builder.git
@@ -20,50 +29,23 @@ cd practice-quiz-builder
 python3 -m http.server 8000
 ```
 
-Open <http://localhost:8000> in your browser.
+Open <http://localhost:8000>. Any static file host works the same way.
 
-- **Try it without an API key:** open **My exams** and choose **Take the demo exam**. The included bank has 16 C pointers and linked-list questions.
-- **Create from your material:** upload files or paste text, choose your AI provider and key, set up the exam, then generate.
-- **Already have questions?** Import a JSON bank or CSV/XLSX spreadsheet. No AI key is needed for these imports.
+> AI generation uses your provider's API and may spend your credits. QuizForge ships no API key and no credits. Check generated answers against your course material.
 
-> AI generation uses your provider's API and may use paid credits. QuizForge does not include an API key or provider credits. Review generated answers against your course material.
+## What's inside
 
-## What you can do
-
-| Start with | Practice with | Learn from |
-| --- | --- | --- |
-| PDF, Word, PowerPoint or text | Multiple choice and true/false | Explanations and topic accuracy |
-| Notes pasted into the browser | Essays and fill-in-the-blank | Smart review of missed questions |
-| Webpage text, where fetching is allowed | Matching and ordering | Flashcards and a mistake-based exam |
-| JSON banks or CSV/XLSX questions | Sandboxed JavaScript coding tasks | Attempt history and progress stats |
-
-Also included: per-question timers, strict exam mode, device read-aloud, voice answers where supported, printing, exam links, translation, library backup, and a dark theme.
-
-### A shorter path to practice
-
-1. **Add material.** Upload files or paste your notes. Webpage and spreadsheet imports sit in expandable sections to keep the main screen focused.
-2. **Connect your provider.** Choose Gemini, OpenAI, Claude, or an OpenAI-compatible endpoint. Model IDs are editable; use a model your provider currently supports.
-3. **Shape the exam.** Choose question count, types, difficulty, language and focus notes.
-4. **Practice and review.** Generated exams are saved in **My exams** on this device.
-
-## English and Arabic, light and dark
-
-Switch language from the header. The Arabic interface uses right-to-left layouts, while code and URLs stay left-to-right. The layout adapts to phones and larger screens without external fonts or a UI framework.
+- **Question types:** multiple choice, true/false, fill-in-the-blank, essay, matching, ordering, coding.
+- **Study tools:** per-question timers, strict exam mode, flashcards, mistake-based exams, chat with your material, cheat sheets, past-exam analysis.
+- **Your library:** exams saved on your device, JSON and CSV/XLSX import, library backup, share-by-link, printing.
+- **Made for everyone:** English and Arabic with RTL layouts, light and dark themes, offline app shell, installable as an app.
 
 <details>
-<summary>Explore the feature screenshot gallery</summary>
+<summary>More screenshots: Arabic on a phone and dark theme</summary>
 
-These captures document the existing feature flows. Some show the earlier visual theme; the banner above introduces the current workflow.
-
-| Take an exam | Review results | Use Arabic |
-| --- | --- | --- |
-| ![A practice question](docs/screenshots/question.png) | ![Exam results](docs/screenshots/results.png) | ![Arabic exam screen](docs/screenshots/ar-quiz.png) |
-
-| Library | Flashcards | Stats |
-| --- | --- | --- |
-| ![Saved exams](docs/screenshots/library.png) | ![Study flashcards](docs/screenshots/flashcards.png) | ![Topic stats](docs/screenshots/stats.png) |
-
-More captures are in [docs/screenshots](docs/screenshots/).
+| Arabic, phone | Dark theme |
+| --- | --- |
+| ![Arabic phone layout](docs/screenshots/studio-ar-mobile.png) | ![Dark theme](docs/screenshots/studio-dark.png) |
 
 </details>
 
@@ -108,6 +90,38 @@ Before submitting a change, try both languages, both themes and a phone-sized vi
 
 Serve these static files with a host of your choice. GitHub Pages can serve the repository root, but must be enabled separately in the repository settings. This visual refresh does not enable hosting or change deployment settings.
 
+## Project map
+
+```text
+index.html       App shell: studio header, navigation, footer
+style.css        QuizForge Studio theme: light, dark, responsive, RTL-safe
+i18n.js          English and Arabic interface strings
+app.js           Imports, generation, library, exams and review
+polish.js        Presentation-only import disclosures and step semantics
+questions.json   Included 16-question demo bank
+sw.js            Versioned offline app-shell cache
+manifest.json    Installable-app metadata
+icon.svg         App icon
+docs/            Question-bank format and screenshots
+CHANGELOG.md     Release history
+```
+
+There is no package install or build step. For imported or generated banks, see the [question-bank format](docs/question-bank-format.md).
+
+### Development checks
+
+```bash
+node --check app.js
+node --check i18n.js
+node --check sw.js
+```
+
+Before submitting a change, try both languages, both themes and a phone-sized viewport. Check upload/paste, the demo exam, library and progress. Bump the cache version in `sw.js` when the app shell changes so installed copies update.
+
+### Hosting
+
+QuizForge is plain static files. The live copy is served by GitHub Pages from the `main` branch root. Fork it and enable Pages in your own repository settings, or use any static host.
+
 ## Contributing
 
 Keep changes dependency-light and accessible. Add English and Arabic strings together, preserve translation placeholders, and check right-to-left layouts. Questions should include a topic, a checked answer and a useful explanation.
@@ -120,14 +134,14 @@ See the [changelog](CHANGELOG.md) for project history and [LICENSE](LICENSE) for
 
 ## العربية
 
-### مادتك الدراسية، بطريقتك.
+### ذاكر بذكاء، وتذكّر لفترة أطول.
 
-**QuizForge** يحوّل ملاحظاتك وشرائح المحاضرات والامتحانات السابقة إلى اختبارات تدريبية، ويساعدك على مراجعة الأخطاء. الواجهة متاحة بالعربية والإنجليزية، مع وضع داكن وتصميم مناسب للموبايل.
+**QuizForge** يحوّل ملاحظاتك وشرائح المحاضرات والامتحانات السابقة إلى امتحانات تدريبية، ثم يعيد عليك الأسئلة التي أخطأت فيها حتى تثبت. الواجهة بالعربية والإنجليزية، مع وضع داكن وتصميم يناسب الموبايل.
 
-**للتجربة من غير مفتاح API:** افتح **امتحاناتي** واختر الامتحان التجريبي. لإنشاء امتحان من مادتك، أضف الملفات أو النص، ثم اختر مزود الذكاء الاصطناعي ومفتاحك وإعدادات الامتحان. استيراد بنوك الأسئلة وجداول البيانات لا يحتاج إلى مفتاح.
+**للتجربة بدون مفتاح API:** افتح **المكتبة** واختر الامتحان التجريبي. لإنشاء امتحان من مادتك، أضف الملفات أو النص، ثم اختر مزود الذكاء الاصطناعي ومفتاحك. استيراد بنوك الأسئلة وجداول البيانات لا يحتاج إلى مفتاح.
 
-**خصوصيتك:** تُحفظ الامتحانات والإعدادات في المتصفح على جهازك. عند استخدام ميزات الذكاء الاصطناعي، تُرسل المادة المطلوبة والمفتاح إلى المزود أو الوكيل الذي تضبطه. قد يستهلك التوليد رصيدًا مدفوعًا عند المزود. راجع الإجابات الناتجة مع مادتك الدراسية، وصدّر نسخة احتياطية قبل مسح بيانات المتصفح.
+**خصوصيتك:** تُحفظ الامتحانات والإعدادات في متصفحك على جهازك. عند استخدام ميزات الذكاء الاصطناعي، تُرسل المادة والمفتاح إلى المزود أو الوكيل الذي تختاره. قد يستهلك التوليد رصيدًا مدفوعًا عند المزود، والمفتاح مسؤوليتك. راجع الإجابات الناتجة مع مادتك، وصدّر نسخة احتياطية قبل مسح بيانات المتصفح.
 
-للتشغيل محليًا، استخدم الأمر `python3 -m http.server 8000` داخل مجلد المشروع، ثم افتح `http://localhost:8000`.
+للتشغيل محليًا: `python3 -m http.server 8000` داخل مجلد المشروع، ثم افتح `http://localhost:8000`.
 
 </div>
