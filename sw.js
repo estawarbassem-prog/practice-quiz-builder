@@ -6,7 +6,7 @@
    still fail loudly (and honestly) when offline. */
 'use strict';
 
-var CACHE_VERSION = 'v6';   // Visual refresh: re-cache the updated shell, copy and styles.
+var CACHE_VERSION = 'v7';   // Studio redesign: re-cache the new shell, copy and styles.
 var CACHE_NAME = 'quizforge-' + CACHE_VERSION;
 
 var SHELL = [
