@@ -8,10 +8,6 @@
 
 No sign-up. No build step. No backend. Your exams stay in your browser, and you choose the AI provider. English and Arabic (right-to-left) throughout, light and dark, phone to desktop. MIT licensed.
 
-| Build | Practice | Review |
-| --- | --- | --- |
-| ![Build screen](docs/screenshots/studio-build.png) | ![Practice screen](docs/screenshots/studio-quiz.png) | ![Library screen](docs/screenshots/studio-library.png) |
-
 ## How it works
 
 1. **Build.** Drop in PDF, Word, PowerPoint or text, paste notes, or import a webpage. Already have questions? Import JSON or CSV/XLSX and skip the AI step.
@@ -39,15 +35,6 @@ Open <http://localhost:8000>. Any static file host works the same way.
 - **Study tools:** per-question timers, strict exam mode, flashcards, mistake-based exams, chat with your material, cheat sheets, past-exam analysis.
 - **Your library:** exams saved on your device, JSON and CSV/XLSX import, library backup, share-by-link, printing.
 - **Made for everyone:** English and Arabic with RTL layouts, light and dark themes, offline app shell, installable as an app.
-
-<details>
-<summary>More screenshots: Arabic on a phone and dark theme</summary>
-
-| Arabic, phone | Dark theme |
-| --- | --- |
-| ![Arabic phone layout](docs/screenshots/studio-ar-mobile.png) | ![Dark theme](docs/screenshots/studio-dark.png) |
-
-</details>
 
 ## Privacy & limitations
 
@@ -102,7 +89,7 @@ questions.json   Included 16-question demo bank
 sw.js            Versioned offline app-shell cache
 manifest.json    Installable-app metadata
 icon.svg         App icon
-docs/            Question-bank format and screenshots
+docs/            Question-bank format and earlier feature screenshots
 CHANGELOG.md     Release history
 ```
 
