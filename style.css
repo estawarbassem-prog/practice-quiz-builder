@@ -1516,3 +1516,53 @@ body.dark .ic-moon { display: none; }
   body.dark .appbar-actions .icon-btn .ic-sun { display: inline-block; }
   body.dark .appbar-actions .icon-btn .ic-moon { display: none; }
                          }
+
+
+/* ---------- Study cycle upgrade (v8, 2026-11-24) ---------- */
+
+/* first-visit welcome card */
+.welcome-card {
+  border: 2px solid var(--btn-bg);
+  background:
+    radial-gradient(280px 140px at 95% 0%, var(--accent-soft), transparent 75%),
+    var(--card);
+}
+.welcome-steps { margin: 6px 0 14px; padding-inline-start: 22px; display: grid; gap: 8px; }
+.welcome-steps li { line-height: 1.55; }
+
+/* library search */
+.lib-search { margin-bottom: 14px; }
+.lib-search .input { width: 100%; }
+.lib-nomatch { margin: 10px 4px; }
+
+/* next-due note beside review buttons */
+.rev-next-due { align-self: center; font-size: .8rem; color: var(--muted); }
+
+/* settings: welcome-guide button */
+.set-welcome-btn { margin: 6px 0; }
+
+/* score trend */
+.trend-svg { width: 100%; height: auto; display: block; }
+.trend-line { fill: none; stroke: var(--btn-bg); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.trend-dot { fill: var(--card); stroke: var(--btn-bg); stroke-width: 3; }
+
+/* activity heatmap: 12 weeks x 7 days */
+.heatmap {
+  display: grid;
+  grid-template-rows: repeat(7, 1fr);
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 4px;
+  margin-top: 10px;
+}
+.hm-cell { display: block; aspect-ratio: 1; border-radius: 4px; background: var(--track); }
+.hm-1 { background: #B7ADFF; }
+.hm-2 { background: #8B73FF; }
+.hm-3 { background: #5B3DF5; }
+.hm-4 { background: #2C1D9A; }
+body.dark .hm-1 { background: #3E3580; }
+body.dark .hm-2 { background: #5543C8; }
+body.dark .hm-3 { background: #7B61FF; }
+body.dark .hm-4 { background: #B7ADFF; }
+.hm-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: .76rem; color: var(--muted); }
+.hm-legend .hm-cell { width: 12px; height: 12px; aspect-ratio: auto; }
