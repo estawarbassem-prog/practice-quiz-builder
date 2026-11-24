@@ -13,7 +13,7 @@ No sign-up. No build step. No backend. Your exams stay in your browser, and you 
 1. **Build.** Drop in PDF, Word, PowerPoint or text, paste notes, or import a webpage. Already have questions? Import JSON or CSV/XLSX and skip the AI step.
 2. **Connect a provider.** Use your own Gemini, OpenAI, Claude or OpenAI-compatible key. Pick question types, difficulty, language and focus.
 3. **Practice.** Multiple choice, true/false, fill-in, essays, matching, ordering and sandboxed coding tasks, with timers, strict mode and read-aloud.
-4. **Review.** Missed questions come back through smart review, flashcards and a mistake-based exam. Progress shows accuracy by topic.
+4. **Review.** Missed questions come back through spaced smart review (they return after 1, 3 and 7 days until mastered), flashcards and a mistake-based exam. Progress shows accuracy by topic, day streaks, a 12-week activity heatmap and your score trend.
 
 Try it with no key at all: open **Library** and take the built-in demo exam (16 C pointers and linked-list questions).
 
@@ -32,8 +32,9 @@ Open <http://localhost:8000>. Any static file host works the same way.
 ## What's inside
 
 - **Question types:** multiple choice, true/false, fill-in-the-blank, essay, matching, ordering, coding.
-- **Study tools:** per-question timers, strict exam mode, flashcards, mistake-based exams, chat with your material, cheat sheets, past-exam analysis.
-- **Your library:** exams saved on your device, JSON and CSV/XLSX import, library backup, share-by-link, printing.
+- **Study tools:** spaced review scheduling, per-question timers, strict exam mode, flashcards, mistake-based exams, chat with your material, cheat sheets, past-exam analysis.
+- **Progress that motivates:** day streaks, a 12-week activity heatmap, a score trend chart and a CSV export of your attempt history.
+- **Your library:** exams saved on your device with search, JSON and CSV/XLSX import, library backup, share-by-link, printing.
 - **Made for everyone:** English and Arabic with RTL layouts, light and dark themes, offline app shell, installable as an app.
 
 ## Privacy & limitations
@@ -50,7 +51,7 @@ Open <http://localhost:8000>. Any static file host works the same way.
 
 ```text
 index.html       App shell and navigation
-style.css        Warm paper / blue theme, dark mode and responsive layouts
+style.css        QuizForge Studio identity, dark mode and responsive layouts
 i18n.js          English and Arabic interface strings
 app.js           Imports, generation, library, exams and review
 polish.js        Presentation-only import disclosures and step semantics
