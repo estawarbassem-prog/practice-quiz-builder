@@ -1,3 +1,11 @@
+# QuizForge Studio redesign · 2026-11-24
+
+- New identity: indigo studio header, violet actions and lime highlights on a lavender canvas, with a matching deep-indigo dark theme and a new app icon and logo.
+- Rebuilt the layout: navigation moves into the header band, a card-style stepper replaces the plain step list, and the upload screen leads with a clearer headline and drop target.
+- Rewrote the interface copy in English and Arabic. Navigation is now Build, Library and Progress. All strings keep their placeholders and parity.
+- Practice, results, library and stats screens share the new look. Core app.js, questions.json and stored user data are unchanged.
+- New README with a banner, screenshots, how-it-works and hosting notes. Bumped the offline shell cache to v7.
+
 # Visual refresh · 2026-11-24
 
 - Refined the warm paper and blue theme with lighter borders, clearer type and responsive navigation.
