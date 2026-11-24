@@ -1,3 +1,12 @@
+# QuizForge study cycle upgrade · 2026-11-24
+
+- Spaced smart review: a missed question now returns after 1, 3 and 7 days of correct answers before it is mastered, instead of leaving the queue after two answers in one sitting. Review buttons show how many are due today, when the next one returns, and offer an early practice round for questions still resting.
+- Progress screen grows up: current and best day streaks, a questions-due-today count, a score trend chart over the last 15 attempts, and a 12-week activity heatmap, all computed locally from attempt history.
+- Attempt history exports to CSV from the Progress screen.
+- A first-visit welcome card explains the no-sign-up model and offers the demo exam as the fastest way in; it can be reopened from Settings.
+- Library search filters exams by title or topic once you have four or more cards.
+- Social/OG meta tags for the published site. Offline shell cache bumped to v8. English and Arabic strings updated together.
+
 # QuizForge Studio redesign · 2026-11-24
 
 - New identity: indigo studio header, violet actions and lime highlights on a lavender canvas, with a matching deep-indigo dark theme and a new app icon and logo.
