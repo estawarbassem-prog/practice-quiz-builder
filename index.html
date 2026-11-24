@@ -3,20 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QuizForge | Your personal practice space</title>
-<meta name="description" content="Turn notes, slides and past papers into practice exams. English and Arabic, local exam storage, and your choice of AI provider.">
-<meta name="theme-color" content="#1668E8">
+<title>QuizForge | Study smarter, remember longer</title>
+<meta name="description" content="Turn notes, slides and past papers into practice exams, then drill the questions you miss. English and Arabic, exams saved on your device, your choice of AI provider.">
+<meta name="theme-color" content="#2C1D9A">
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="wrap">
+<div class="studio-band"><div class="band-inner">
 
 <div class="appbar-wrap">
   <header class="appbar">
     <div class="brand">
       <span class="logo-mark" aria-hidden="true">
-        <svg viewBox="0 0 48 48" width="40" height="40"><rect x="2.5" y="2.5" width="43" height="43" rx="10" fill="#1668E8" stroke="#1E1B16" stroke-width="2.5"/><text x="24" y="33" text-anchor="middle" font-size="27" font-weight="800" fill="#fff" font-family="Arial, sans-serif">?</text></svg>
+        <svg viewBox="0 0 48 48" width="44" height="44"><defs><linearGradient id="qg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8B73FF"/><stop offset="1" stop-color="#4829DE"/></linearGradient></defs><rect width="48" height="48" rx="14" fill="url(#qg)"/><circle cx="23" cy="22" r="10.5" fill="none" stroke="#fff" stroke-width="4"/><path d="M26 27l9 9" stroke="#C5F536" stroke-width="5" stroke-linecap="round"/><path d="M18.5 22.5l3.2 3.2 5.6-6.4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </span>
       <div class="brand-text">
         <h1>QuizForge</h1>
@@ -25,8 +25,7 @@
     </div>
     <div class="appbar-actions">
       <button class="icon-btn" id="install-btn" type="button" data-i18n-title="installAppTitle" title="Install QuizForge on this device" hidden>
-        <span aria-hidden="true">⬇</span>
-        <span data-i18n="installApp">Install app</span>
+                <span data-i18n="installApp">Install app</span>
       </button>
       <button class="icon-btn" id="lang-toggle" type="button" title="التبديل إلى العربية">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg>
@@ -80,14 +79,16 @@
 </div>
 
 <nav class="view-nav" aria-label="Main views">
-  <button class="nav-tab active" id="nav-create" type="button"><span data-i18n="navCreate">✦ Create exam</span></button>
-  <button class="nav-tab" id="nav-library" type="button"><span data-i18n="navLibrary">▤ My exams</span> <span class="nav-count" id="nav-lib-count" hidden></span></button>
-  <button class="nav-tab" id="nav-stats" type="button"><span data-i18n="navStats">📊 Stats</span></button>
+  <button class="nav-tab active" id="nav-create" type="button"><span data-i18n="navCreate">Build</span></button>
+  <button class="nav-tab" id="nav-library" type="button"><span data-i18n="navLibrary">Library</span> <span class="nav-count" id="nav-lib-count" hidden></span></button>
+  <button class="nav-tab" id="nav-stats" type="button"><span data-i18n="navStats">Progress</span></button>
 </nav>
+</div></div>
 
+<div class="wrap main-wrap">
 <div id="app"></div>
 
-<footer id="foot" data-i18n="foot">QuizForge — upload any material, bring your own AI key, get an exam. Your key never leaves your browser except to the provider you choose.</footer>
+<footer id="foot" data-i18n="foot">QuizForge turns your material into practice. Your AI key goes only to the provider you choose.</footer>
 
 </div>
 
