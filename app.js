@@ -37,7 +37,9 @@
   var LS_REVIEW = 'qf-review';   // {bankKey: {title, items: {qid: {streak, added}}}}
   var LS_STATS = 'qf-stats';     // [{id, ts, title, total, score, secs, items: [{topic, correct, secs}]}]
   var STATS_MAX = 50;            // keep only the newest 50 attempts
-  var REV_NEEDED = 2;            // consecutive correct answers to master a question
+  var REV_NEEDED = 3;            // spaced correct answers to master a question
+  var REV_GAPS = [1, 3, 7];      // days a question rests after each correct answer
+  var LS_WELCOME = 'qf-welcomed-v1'; // set once the first-visit welcome card is dismissed
   var TTS_RATES = [0.8, 1, 1.25]; // Slow / Normal / Fast reading speeds
 
   /* Share via link: the exam rides in the URL hash (#exam=<payload>).
@@ -185,6 +187,32 @@
 
   /* Today's date as YYYY-MM-DD, the library's date stamp. */
   function todayStr() { return new Date().toISOString().slice(0, 10); }
+
+  /* Local calendar day as YYYY-MM-DD. Review scheduling and the
+     activity heatmap work in the student's own day, not UTC. */
+  function localDayStr(d) {
+    var y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
+    return y + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
+  /* The day n days after a YYYY-MM-DD string, as YYYY-MM-DD. */
+  function addDaysStr(dayStr, n) {
+    var p = dayStr.split('-');
+    var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+    d.setDate(d.getDate() + n);
+    return localDayStr(d);
+  }
+
+  /* A short, localized label for a YYYY-MM-DD string (no time). */
+  function fmtDay(dayStr) {
+    try {
+      var p = dayStr.split('-');
+      var d = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+      if (isNaN(d.getTime())) return dayStr;
+      var locale = (typeof getLang === 'function' && getLang() === 'ar') ? 'ar-EG' : 'en-US';
+      return d.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+    } catch (e) { return dayStr; }
+  }
 
   /* Unique library-entry id: prefix + timestamp + random suffix, so
      two imports in the same millisecond still get different ids. */
@@ -665,6 +693,44 @@
     return Object.keys(reviewEntries(bank)).length;
   }
 
+  /* Spaced review (2026-11-24): an item is due when its 'due' day is
+     today or past. Items saved before scheduling have no 'due' and
+     count as due today, so nothing already queued is hidden. */
+  function isDueItem(item, today) {
+    return !item.due || item.due <= today;
+  }
+
+  function reviewDueCountFor(bank) {
+    var today = localDayStr(new Date());
+    var items = reviewEntries(bank);
+    var n = 0;
+    Object.keys(items).forEach(function (id) { if (isDueItem(items[id], today)) n++; });
+    return n;
+  }
+
+  function reviewDueTotal() {
+    var today = localDayStr(new Date());
+    var d = loadReview();
+    var n = 0;
+    Object.keys(d).forEach(function (k) {
+      var items = (d[k] && d[k].items) || {};
+      Object.keys(items).forEach(function (id) { if (isDueItem(items[id], today)) n++; });
+    });
+    return n;
+  }
+
+  /* Earliest future due day in one bank's queue, or null. */
+  function reviewNextDue(bank) {
+    var today = localDayStr(new Date());
+    var items = reviewEntries(bank);
+    var next = null;
+    Object.keys(items).forEach(function (id) {
+      var due = items[id].due;
+      if (due && due > today && (!next || due < next)) next = due;
+    });
+    return next;
+  }
+
   function reviewTotalCount() {
     var d = loadReview();
     var n = 0;
@@ -682,7 +748,7 @@
     var items = d[key].items;
     wrongIndexes.forEach(function (qi) {
       var id = qId(bank.questions[qi]);
-      if (!items[id]) items[id] = { streak: 0, added: todayStr() };
+      if (!items[id]) items[id] = { streak: 0, added: todayStr(), due: localDayStr(new Date()) };
     });
     saveReview(d);
   }
@@ -713,8 +779,10 @@
       if (correct) {
         item.streak = Math.min((item.streak || 0) + 1, REV_NEEDED);
         if (item.streak >= REV_NEEDED) { delete e.items[id]; mastered = true; }
+        else item.due = addDaysStr(localDayStr(new Date()), REV_GAPS[Math.min(item.streak, REV_GAPS.length) - 1]);
       } else {
         item.streak = 0;
+        item.due = localDayStr(new Date());
       }
       if (mastered) anyMastered = true;
       if (k === key) {
@@ -803,12 +871,14 @@
 
   /* Start a review session for one bank: the queued questions, in
      their bank order. Returns false when the queue is empty. */
-  function startReview(bank) {
+  function startReview(bank, includeAll) {
     if (!bank) return false;
     var items = reviewEntries(bank);
+    var today = localDayStr(new Date());
     var indexes = [];
     bank.questions.forEach(function (q, i) {
-      if (items[qId(q)]) indexes.push(i);
+      var item = items[qId(q)];
+      if (item && (includeAll || isDueItem(item, today))) indexes.push(i);
     });
     if (!indexes.length) return false;
     quiz = bank;
@@ -819,19 +889,41 @@
   /* One review button (with count) appended to a button row, only
      when this bank has queued questions. */
   function addReviewButton(bank, rowEl, primary) {
-    var n = reviewCountFor(bank);
-    if (!n) return null;
-    var b = el('button', 'btn ' + (primary ? 'btn-primary' : 'btn-secondary'), t('revStart', { n: n }));
-    b.type = 'button';
-    b.addEventListener('click', function () { startReview(bank); });
-    rowEl.appendChild(b);
-    return b;
+    var total = reviewCountFor(bank);
+    if (!total) return null;
+    var due = reviewDueCountFor(bank);
+    if (due) {
+      var b = el('button', 'btn ' + (primary ? 'btn-primary' : 'btn-secondary'), t('revStart', { n: due }));
+      b.type = 'button';
+      b.addEventListener('click', function () { startReview(bank); });
+      rowEl.appendChild(b);
+      /* Some queued questions may still be resting between spaced
+         rounds: say when the next one returns, and let an impatient
+         student run the resting ones early. */
+      if (due < total) {
+        var next = reviewNextDue(bank);
+        if (next) rowEl.appendChild(el('span', 'rev-next-due', t('revNextDue', { date: fmtDay(next) })));
+        var early = el('button', 'btn btn-secondary btn-small', t('revStartEarly', { n: total - due }));
+        early.type = 'button';
+        early.addEventListener('click', function () { startReview(bank, true); });
+        rowEl.appendChild(early);
+      }
+      return b;
+    }
+    var next0 = reviewNextDue(bank);
+    if (next0) rowEl.appendChild(el('span', 'rev-next-due', t('revNextDue', { date: fmtDay(next0) })));
+    var earlyAll = el('button', 'btn btn-secondary', t('revStartEarly', { n: total }));
+    earlyAll.type = 'button';
+    earlyAll.addEventListener('click', function () { startReview(bank, true); });
+    rowEl.appendChild(earlyAll);
+    return earlyAll;
   }
 
   /* Debug/test handle (like window.__qfLastShare for sharing). */
   window.__qfReview = {
     bankKey: bankKey, qId: qId, loadReview: loadReview,
     reviewCountFor: reviewCountFor, reviewTotalCount: reviewTotalCount,
+    reviewDueCountFor: reviewDueCountFor, reviewDueTotal: reviewDueTotal,
     startReview: startReview, clearReviewFor: clearReviewFor,
     needed: REV_NEEDED
   };
@@ -1346,9 +1438,53 @@
     }
   }
 
+  /* ---------- first-visit welcome ----------
+     Shown once on the Build view (and again from Settings on
+     request): what the app does, that no account is needed, and the
+     fastest way in — the demo exam. The dismissal is a local flag;
+     nothing leaves the browser. */
+  function maybeWelcome(wrap) {
+    try { if (localStorage.getItem(LS_WELCOME)) return; } catch (e) {}
+    var card = el('section', 'card welcome-card');
+    card.appendChild(el('p', 'kicker', t('welKicker')));
+    card.appendChild(el('h2', null, t('welTitle')));
+    card.appendChild(el('p', 'hero-text', t('welBody')));
+    var list = el('ol', 'welcome-steps');
+    [t('welStep1'), t('welStep2'), t('welStep3')].forEach(function (s) {
+      list.appendChild(el('li', null, s));
+    });
+    card.appendChild(list);
+    var row = el('div', 'btnrow');
+    var demo = el('button', 'btn btn-primary', t('welDemo'));
+    demo.id = 'welcome-demo-btn';
+    demo.type = 'button';
+    demo.addEventListener('click', function () {
+      dismissWelcome();
+      if (sampleQuiz) loadBank(sampleQuiz);
+      else setView('library');
+    });
+    row.appendChild(demo);
+    var skip = el('button', 'btn btn-secondary', t('welSkip'));
+    skip.id = 'welcome-skip-btn';
+    skip.type = 'button';
+    skip.addEventListener('click', function () {
+      dismissWelcome();
+      renderWizard();
+    });
+    row.appendChild(skip);
+    card.appendChild(row);
+    wrap.appendChild(card);
+  }
+
+  function dismissWelcome() {
+    try { localStorage.setItem(LS_WELCOME, '1'); } catch (e) {}
+  }
+
   function renderWizard() {
     app.innerHTML = '';
     var wrap = el('div');
+
+    maybeWelcome(wrap);
 
     // Step indicator
     var steps = el('ol', 'steps');
@@ -5126,6 +5262,39 @@
     head.appendChild(backupOk);
     wrap.appendChild(head);
 
+    var lib = loadLibrary();
+
+    /* Library search (2026-11-24): with a handful of exams the list
+       is short enough to scan; from four cards up, a filter box
+       narrows by title, subtitle or question topic. */
+    var libCards = [];
+    var libCardsTotal = lib.length + (sampleQuiz ? 1 : 0);
+    if (libCardsTotal >= 4) {
+      var sWrap = el('div', 'lib-search');
+      var sInput = document.createElement('input');
+      sInput.type = 'search';
+      sInput.id = 'lib-search-input';
+      sInput.className = 'input';
+      sInput.placeholder = t('libSearch');
+      sInput.setAttribute('aria-label', t('libSearchAria'));
+      sWrap.appendChild(sInput);
+      wrap.appendChild(sWrap);
+      var noMatch = el('p', 'muted lib-nomatch', t('libNoMatch'));
+      noMatch.id = 'lib-nomatch';
+      noMatch.hidden = true;
+      wrap.appendChild(noMatch);
+      sInput.addEventListener('input', function () {
+        var term = sInput.value.trim().toLowerCase();
+        var shown = 0;
+        libCards.forEach(function (c) {
+          var hit = !term || (c.dataset.search || '').indexOf(term) !== -1;
+          c.hidden = !hit;
+          if (hit) shown++;
+        });
+        noMatch.hidden = shown !== 0;
+      });
+    }
+
     // Demo bank card — no key needed
     if (sampleQuiz) {
       var demo = el('section', 'card lib-card demo-card');
@@ -5148,10 +5317,12 @@
       addFlashcardsButton(sampleQuiz, drow);
       addReviewButton(sampleQuiz, drow, false);
       demo.appendChild(drow);
+      demo.dataset.search = ((sampleQuiz.title || '') + ' ' + (sampleQuiz.subtitle || '') + ' ' +
+        sampleQuiz.questions.map(function (q) { return q.topic || ''; }).join(' ')).toLowerCase();
+      libCards.push(demo);
       wrap.appendChild(demo);
     }
 
-    var lib = loadLibrary();
     if (!lib.length) {
       var empty = el('section', 'card');
       empty.appendChild(el('p', 'muted', t('libEmpty')));
@@ -5159,6 +5330,9 @@
     }
     lib.forEach(function (entry) {
       var card = el('section', 'card lib-card');
+      card.dataset.search = ((entry.title || '') + ' ' + (entry.subtitle || '') + ' ' +
+        (entry.bank && entry.bank.questions ? entry.bank.questions.map(function (q) { return q.topic || ''; }).join(' ') : '')).toLowerCase();
+      libCards.push(card);
       card.appendChild(el('h3', null, entry.title));
       card.appendChild(el('p', 'muted',
         t('qCount', { n: entry.count }) + ' · ' + entry.date +
@@ -5996,6 +6170,10 @@
     head.appendChild(el('p', 'kicker', t('statsKicker')));
     head.appendChild(el('h2', null, t('statsTitle')));
     var attempts = loadStats();
+    /* recordAttempt keeps history newest-first, but an imported or
+       merged history may not be: sort defensively so the recent list,
+       aggregates and the trend all read in the right order. */
+    attempts = attempts.slice().sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
 
     if (!attempts.length) {
       head.appendChild(el('p', 'hero-text', t('statsEmptyBody')));
@@ -6038,6 +6216,12 @@
     grid.appendChild(statCard(t('statsQuestions'), String(totalQ)));
     grid.appendChild(statCard(t('statsAvgScore'), avgPct + '%'));
     grid.appendChild(statCard(t('statsAvgTime'), t('statsAvgSec', { s: avgSecs.toFixed(1) })));
+    /* Study rhythm (2026-11-24): consecutive-day streaks and the
+       spaced-review workload waiting today. */
+    var streaks = computeStreaks(attempts);
+    grid.appendChild(statCard(t('statsStreakCur'), String(streaks.current)));
+    grid.appendChild(statCard(t('statsStreakBest'), String(streaks.best)));
+    grid.appendChild(statCard(t('statsDue'), String(reviewDueTotal())));
     head.appendChild(grid);
     /* Exam from mistakes only (Feature 5, 2026-11-23): the mistakes
        live here in the stats, so the button belongs here too. */
@@ -6045,6 +6229,13 @@
     addMistakesButton(mRow);
     if (mRow.childNodes.length) head.appendChild(mRow);
     wrap.appendChild(head);
+
+    /* Score trend: last 15 attempts, oldest to newest. */
+    var trendCard = buildTrendCard(attempts);
+    if (trendCard) wrap.appendChild(trendCard);
+
+    /* Activity heatmap: the last 12 weeks, one cell per day. */
+    wrap.appendChild(buildHeatmapCard(attempts));
 
     /* Per-topic accuracy, best first. */
     var ranked = Object.keys(byTopic).map(function (name) {
@@ -6107,6 +6298,9 @@
     });
     rCard.appendChild(list);
     var row = el('div', 'btnrow');
+    var csvBtn = el('button', 'btn btn-secondary', t('statsExportCsv'));
+    csvBtn.addEventListener('click', function () { exportStatsCsv(attempts); });
+    row.appendChild(csvBtn);
     var clearBtn = el('button', 'btn btn-secondary', t('statsClear'));
     clearBtn.addEventListener('click', function () {
       if (!window.confirm(t('statsConfirmClear'))) return;
@@ -6119,6 +6313,146 @@
     wrap.appendChild(rCard);
 
     app.appendChild(wrap);
+  }
+
+  /* Consecutive-day study streaks from attempt timestamps, in local
+     days. A streak is still alive when the last active day is today
+     or yesterday. */
+  function computeStreaks(attempts) {
+    var days = {};
+    attempts.forEach(function (a) {
+      if (a && a.ts) days[localDayStr(new Date(a.ts))] = true;
+    });
+    var today = localDayStr(new Date());
+    var startDay = days[today] ? today : addDaysStr(today, -1);
+    var cur = 0;
+    var day = startDay;
+    while (days[day]) { cur++; day = addDaysStr(day, -1); }
+    return { current: cur, best: bestStreak(days) };
+  }
+
+  function bestStreak(days) {
+    var best = 0;
+    Object.keys(days).forEach(function (start) {
+      if (days[addDaysStr(start, -1)]) return;  /* not a run start */
+      var n = 0, day = start;
+      while (days[day]) { n++; day = addDaysStr(day, 1); }
+      if (n > best) best = n;
+    });
+    return best;
+  }
+
+  /* Score trend card: one dot per attempt (last 15, oldest first),
+     joined by a line. Pure SVG, no dependency. */
+  function buildTrendCard(attempts) {
+    var pts = attempts.slice(0, 15).reverse().map(function (a) {
+      return { pct: a.total ? Math.round(a.score / a.total * 100) : 0,
+        title: a.title || '', ts: a.ts };
+    });
+    if (pts.length < 2) return null;
+    var card = el('section', 'card');
+    card.appendChild(el('h2', 'stats-sec', t('statsTrendTitle')));
+    var W = 600, H = 140, PAD = 14;
+    var svgNS = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('class', 'trend-svg');
+    var stepX = pts.length > 1 ? (W - 2 * PAD) / (pts.length - 1) : 0;
+    var coords = pts.map(function (p, i) {
+      return [PAD + i * stepX, PAD + (100 - p.pct) / 100 * (H - 2 * PAD)];
+    });
+    var line = document.createElementNS(svgNS, 'polyline');
+    line.setAttribute('points', coords.map(function (c) { return c[0].toFixed(1) + ',' + c[1].toFixed(1); }).join(' '));
+    line.setAttribute('class', 'trend-line');
+    svg.appendChild(line);
+    coords.forEach(function (c, i) {
+      var dot = document.createElementNS(svgNS, 'circle');
+      dot.setAttribute('cx', c[0].toFixed(1));
+      dot.setAttribute('cy', c[1].toFixed(1));
+      dot.setAttribute('r', '5');
+      dot.setAttribute('class', 'trend-dot');
+      var tip = document.createElementNS(svgNS, 'title');
+      tip.textContent = pts[i].title + ' · ' + pts[i].pct + '%' +
+        (pts[i].ts ? ' · ' + fmtAttemptDate(pts[i].ts) : '');
+      dot.appendChild(tip);
+      svg.appendChild(dot);
+    });
+    card.appendChild(svg);
+    /* Hover is not always available (touch), so the range and scale
+       are printed under the chart. */
+    var axis = el('div', 'trend-axis');
+    axis.appendChild(el('span', null, fmtDay(localDayStr(new Date(pts[0].ts)))));
+    axis.appendChild(el('span', 'trend-axis-mid', '0–100%'));
+    axis.appendChild(el('span', null, fmtDay(localDayStr(new Date(pts[pts.length - 1].ts)))));
+    card.appendChild(axis);
+    return card;
+  }
+
+  /* Activity heatmap card: the last 84 days as a 12-week grid,
+     intensity = questions answered that day. */
+  function buildHeatmapCard(attempts) {
+    var byDay = {};
+    attempts.forEach(function (a) {
+      if (!a || !a.ts) return;
+      var d = localDayStr(new Date(a.ts));
+      byDay[d] = (byDay[d] || 0) + (a.total || 0);
+    });
+    var card = el('section', 'card');
+    card.appendChild(el('h2', 'stats-sec', t('statsHeatTitle')));
+    card.appendChild(el('p', 'muted hm-caption', t('statsHeatWindow')));
+    var detail = el('p', 'hm-detail', t('statsHeatTap'));
+    var grid = el('div', 'heatmap');
+    var today = localDayStr(new Date());
+    var _i;
+    for (var i = 83; i >= 0; i--) {
+      var day = addDaysStr(today, -i);
+      var n = byDay[day] || 0;
+      var level = n === 0 ? 0 : n <= 2 ? 1 : n <= 5 ? 2 : n <= 9 ? 3 : 4;
+      var cellEl = el('button', 'hm-cell hm-' + level);
+      cellEl.type = 'button';
+      cellEl.title = fmtDay(day) + ' · ' + t('qCount', { n: n });
+      cellEl.setAttribute('aria-label', cellEl.title);
+      /* Touch has no hover: tapping a day prints its count below. */
+      cellEl.addEventListener('click', function () {
+        detail.textContent = this.title;
+      });
+      grid.appendChild(cellEl);
+    }
+    card.appendChild(grid);
+    var legend = el('div', 'hm-legend');
+    legend.appendChild(el('span', null, t('statsHeatLess')));
+    [0, 1, 2, 3, 4].forEach(function (lv) { legend.appendChild(el('span', 'hm-cell hm-legend-cell hm-' + lv)); });
+    legend.appendChild(el('span', null, t('statsHeatMore')));
+    card.appendChild(legend);
+    card.appendChild(detail);
+    return card;
+  }
+
+  /* Attempt history as a CSV download: one row per attempt, newest
+     first, ready for a spreadsheet. The BOM keeps Excel on UTF-8. */
+  function exportStatsCsv(attempts) {
+    var rows = [['date', 'title', 'score', 'total', 'pct', 'seconds']];
+    attempts.forEach(function (a) {
+      rows.push([
+        a.ts ? new Date(a.ts).toISOString() : '',
+        String(a.title || '').replace(/"/g, '""'),
+        a.score, a.total,
+        a.total ? Math.round(a.score / a.total * 100) : 0,
+        a.secs || 0
+      ]);
+    });
+    var csv = rows.map(function (r) {
+      return r.map(function (v, i) {
+        return i === 1 ? '"' + v + '"' : String(v);
+      }).join(',');
+    }).join('\r\n');
+    var blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'quizforge-history.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   }
 
   function statCard(label, value) {
@@ -6427,6 +6761,13 @@
     });
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') closeSettingsPanel();
+    });
+
+    var wb = document.getElementById('set-welcome-btn');
+    if (wb) wb.addEventListener('click', function () {
+      try { localStorage.removeItem(LS_WELCOME); } catch (e) {}
+      closeSettingsPanel();
+      setView('create');
     });
 
     var sh = document.getElementById('set-shuffle');
@@ -8111,7 +8452,7 @@
       var res = run.reviewLast || { streak: 0, mastered: false };
       var sl = el('div', 'rev-streak-line' + (res.mastered ? ' mastered' : ''));
       sl.textContent = res.mastered ? t('revMastered')
-        : (state.correct ? t('revStreakAfter', { n: res.streak }) : t('revNotYet'));
+        : (state.correct ? t('revStreakAfter', { n: res.streak, m: REV_NEEDED }) : t('revNotYet', { m: REV_NEEDED }));
       card.appendChild(sl);
     }
     app.appendChild(card);
@@ -8968,7 +9309,9 @@
     var row = el('div', 'btnrow');
     if (remaining > 0) {
       var cont = el('button', 'btn btn-primary', t('revContinue', { n: remaining }));
-      cont.addEventListener('click', function () { startReview(bank); });
+      /* Continue runs every queued question, not only the ones due
+         today: a deliberate extra round, not the spacing schedule. */
+      cont.addEventListener('click', function () { startReview(bank, true); });
       row.appendChild(cont);
     }
     var backExam = el('button', 'btn btn-secondary', t('revBackTopics'));
