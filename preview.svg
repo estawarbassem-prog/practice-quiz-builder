@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="480" viewBox="0 0 1200 480" role="img" aria-labelledby="title desc">
+<title id="title">QuizForge: your material, your practice space</title>
+<desc id="desc">A warm paper and blue banner showing the four steps: add material, connect your AI, shape the exam, and practice and review.</desc>
+<rect width="1200" height="480" rx="24" fill="#f5f2eb"/>
+<g font-family="Arial,sans-serif">
+<rect x="56" y="50" width="48" height="48" rx="13" fill="#1668e8"/>
+<text x="80" y="84" fill="white" font-size="32" text-anchor="middle" font-weight="700">?</text>
+<text x="120" y="84" fill="#1e1b16" font-size="30" font-weight="700">QuizForge</text>
+<text x="56" y="167" fill="#1e1b16" font-size="48" font-weight="700">Your material.</text>
+<text x="56" y="225" fill="#1e1b16" font-size="48" font-weight="700">Your practice space.</text>
+<text x="56" y="275" fill="#5d6370" font-size="22">Turn notes, slides and past papers into practice.</text>
+<rect x="56" y="324" width="279" height="48" rx="12" fill="#1668e8"/>
+<text x="195" y="355" fill="white" font-size="18" text-anchor="middle" font-weight="700">English + Arabic</text>
+<text x="56" y="425" fill="#5d6370" font-size="17">No sign-up. No build step. Your choice of AI.</text>
+<rect x="720" y="50" width="424" height="380" rx="22" fill="white" stroke="#dadde3"/>
+<text x="750" y="96" fill="#1668e8" font-size="15" font-weight="700" letter-spacing="2">FROM MATERIAL TO MASTERY</text>
+<g font-size="19" fill="#1e1b16" font-weight="700">
+<circle cx="771" cy="150" r="20" fill="#edf3ff"/><text x="771" y="157" text-anchor="middle" fill="#1668e8">1</text><text x="810" y="157">Add your material</text>
+<path d="M771 178v28" stroke="#dadde3" stroke-width="2"/>
+<circle cx="771" cy="228" r="20" fill="#edf3ff"/><text x="771" y="235" text-anchor="middle" fill="#1668e8">2</text><text x="810" y="235">Connect your AI</text>
+<path d="M771 256v28" stroke="#dadde3" stroke-width="2"/>
+<circle cx="771" cy="306" r="20" fill="#edf3ff"/><text x="771" y="313" text-anchor="middle" fill="#1668e8">3</text><text x="810" y="313">Shape the exam</text>
+<path d="M771 334v15" stroke="#dadde3" stroke-width="2"/>
+<circle cx="771" cy="377" r="20" fill="#1668e8"/><text x="771" y="384" text-anchor="middle" fill="white">4</text><text x="810" y="384">Practice. Review. Repeat.</text>
+</g></g></svg>
