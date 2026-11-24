@@ -1566,3 +1566,11 @@ body.dark .hm-3 { background: #7B61FF; }
 body.dark .hm-4 { background: #B7ADFF; }
 .hm-legend { display: flex; align-items: center; gap: 4px; margin-top: 10px; font-size: .76rem; color: var(--muted); }
 .hm-legend .hm-cell { width: 12px; height: 12px; aspect-ratio: auto; }
+
+
+/* trend axis + heatmap detail (v8 follow-up) */
+.trend-axis { display: flex; justify-content: space-between; margin-top: 6px; font-size: .76rem; color: var(--muted); }
+.hm-caption { margin-top: 2px; font-size: .8rem; }
+button.hm-cell { border: 0; padding: 0; width: 100%; font: inherit; cursor: pointer; }
+button.hm-cell:focus-visible { outline: 2px solid var(--btn-bg); outline-offset: 1px; }
+.hm-detail { margin-top: 8px; font-size: .8rem; color: var(--muted); }
